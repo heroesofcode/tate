@@ -185,11 +185,6 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      goLibrary();
-      return;
-    }
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       toggleOverlay();
@@ -197,6 +192,13 @@
   }
 
   onMount(() => {
+    // Escape leaves the chapter even when focus is not on the scroller.
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      goLibrary();
+    };
+    window.addEventListener('keydown', onEscape, true);
     let stop = () => {};
     let cancelled = false;
     void (async () => {
@@ -269,6 +271,7 @@
     })();
     return () => {
       cancelled = true;
+      window.removeEventListener('keydown', onEscape, true);
       stop();
       loaded.close();
       screenWake.close();
