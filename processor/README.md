@@ -62,7 +62,7 @@ Panels are ordered right to left and top to bottom. `--direction ltr` mirrors th
 
 ONNX Runtime on `CPUExecutionProvider`. The model is "manga panel & text detector (YOLO26-nano)": class 0 is a panel, class 1 is text. The first run downloads it into the user cache directory (`platformdirs`). `TATE_MODEL_PATH` points at a local file instead.
 
-Input is `1x3x1024x1024` float RGB in `0..1`, letterboxed with pad 114. Output `output0` is `1x300x6`: `x1, y1, x2, y2, conf, class` in letterboxed pixels, already NMS'd.
+Input is `1x3x1024x1024` float RGB in `0..1`, letterboxed with pad 114. Output `output0` is `1x300x6`: `x1, y1, x2, y2, conf, class` in letterboxed pixels, already NMS'd. After the model runs, frame rectangles are merged in. A box is split only when those rectangles tile it, a frame the model missed is added, and a single overlapping frame does not replace the model box. A blob the size of the page is ignored. When the model boxes are a single region, a huge region, or a heavy overlap, an aligned row-and-column set of frames replaces them. When the boxes still overlap and the gutters form a clean tiling, that tiling is used instead.
 
 ### cv
 
