@@ -651,6 +651,73 @@ def test_a_touching_sliver_without_a_rule_on_the_edge_still_folds() -> None:
     image.close()
 
 
+def test_a_touching_sliver_with_a_light_interior_folds() -> None:
+    """Paper with ink strokes is a light panel, not a gutter on a shared edge.
+
+    The boxes may meet exactly or overlap. Nothing but a frame rule may keep
+    the sliver apart.
+    """
+    wide = Box(40, 36, 560, 624)
+    for shift in (0, 4):
+        narrow = Box(600 - shift, 36, 70, 624)
+        image = Image.new("RGB", (900, 700), (236, 228, 204))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((wide.x, wide.y, narrow.x2, wide.y2), fill=(248, 242, 224))
+        for top in range(80, 600, 48):
+            draw.line((90, top, 520, top + 18), fill=(25, 25, 25), width=3)
+            draw.line((618, top + 10, 658, top + 28), fill=(25, 25, 25), width=3)
+        draw.rectangle((480, 140, 560, 280), fill=(20, 20, 20))
+        draw.rectangle((616, 360, 662, 500), fill=(20, 20, 20))
+        draw.ellipse((180, 300, 320, 460), outline=(10, 10, 10), width=4)
+        kept = absorb_slivers(image, [wide, narrow])
+        assert len(kept) == 1
+        assert kept[0].x <= wide.x and kept[0].x2 >= narrow.x2
+        image.close()
+
+    wide_row = Box(30, 30, 840, 500)
+    flat = Box(30, 530, 840, 44)
+    image = Image.new("RGB", (900, 800), (236, 228, 204))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((wide_row.x, wide_row.y, flat.x2, flat.y2), fill=(248, 242, 224))
+    for left in range(60, 820, 70):
+        draw.line((left, 80, left + 24, 460), fill=(25, 25, 25), width=3)
+        draw.line((left + 8, 548, left + 30, 568), fill=(25, 25, 25), width=3)
+    draw.rectangle((200, 420, 420, 490), fill=(20, 20, 20))
+    draw.rectangle((240, 540, 460, 570), fill=(20, 20, 20))
+    kept = absorb_slivers(image, [wide_row, flat])
+    assert len(kept) == 1
+    assert kept[0].y <= wide_row.y and kept[0].y2 >= flat.y2
+    image.close()
+
+
+def test_a_touching_narrow_panel_with_a_light_interior_and_a_rule_stays() -> None:
+    """A dark frame rule on the shared edge keeps a light narrow panel apart."""
+    wide = Box(40, 36, 560, 624)
+    for shift in (0, 4):
+        narrow = Box(600 - shift, 36, 70, 624)
+        image = Image.new("RGB", (900, 700), (236, 228, 204))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((wide.x, wide.y, narrow.x2, wide.y2), fill=(248, 242, 224))
+        for top in range(90, 580, 70):
+            draw.line((80, top, 540, top + 16), fill=(30, 30, 30), width=3)
+            draw.line((630, top + 12, 660, top + 30), fill=(30, 30, 30), width=3)
+        draw.line((600, wide.y, 600, wide.y2), fill=(0, 0, 0), width=4)
+        assert len(absorb_slivers(image, [wide, narrow])) == 2
+        image.close()
+
+    wide_row = Box(30, 30, 840, 500)
+    flat = Box(30, 530, 840, 44)
+    image = Image.new("RGB", (900, 800), (236, 228, 204))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((wide_row.x, wide_row.y, flat.x2, flat.y2), fill=(248, 242, 224))
+    for left in range(70, 800, 80):
+        draw.line((left, 70, left + 20, 450), fill=(30, 30, 30), width=3)
+        draw.line((left + 6, 550, left + 28, 568), fill=(30, 30, 30), width=3)
+    draw.line((wide_row.x, 530, wide_row.x2, 530), fill=(0, 0, 0), width=4)
+    assert len(absorb_slivers(image, [wide_row, flat])) == 2
+    image.close()
+
+
 def test_a_narrow_panel_across_a_paper_gap_is_not_a_sliver() -> None:
     image = Image.new("RGB", (800, 600), "white")
     draw = ImageDraw.Draw(image)
