@@ -327,13 +327,24 @@ def _parse_image(value: object, label: str) -> SourceImage | DeriveImage:
         return DeriveImage(origin, tuple(ops))
     if "source" not in data:
         raise TateError(f"{label} must contain source or derive")
-    _reject_unknown(data, {"source", "member", "pdf_page"}, label)
+    _reject_unknown(data, {"source", "member", "pdf_page", "crop"}, label)
     source = _expect_id(_require(data, "source", label), f"{label}.source")
     member = _parse_member(data["member"], f"{label}.member") if "member" in data else None
     pdf_page = _expect_int(data["pdf_page"], f"{label}.pdf_page") if "pdf_page" in data else None
     if pdf_page is not None and pdf_page < 0:
         raise TateError(f"{label}.pdf_page must be 0 or greater")
-    return SourceImage(source, member, pdf_page)
+    crop = _parse_crop(data["crop"], f"{label}.crop") if "crop" in data else None
+    return SourceImage(source, member, pdf_page, crop)
+
+
+def _parse_crop(value: object, label: str) -> tuple[int, int, int, int]:
+    rows = _expect_list(value, label)
+    if len(rows) != 4:
+        raise TateError(f"{label} must be [x1, y1, x2, y2]")
+    x1, y1, x2, y2 = (_expect_int(item, f"{label}[{index}]") for index, item in enumerate(rows))
+    if x1 < 0 or y1 < 0 or x2 <= x1 or y2 <= y1:
+        raise TateError(f"{label} must be a non-empty box with x1, y1 >= 0")
+    return (x1, y1, x2, y2)
 
 
 def _parse_ops(value: object, label: str) -> list[Op]:
@@ -524,6 +535,8 @@ def image_to_json(image: SourceImage | DeriveImage) -> dict[str, object]:
         body["member"] = image.member
     if image.pdf_page is not None:
         body["pdf_page"] = image.pdf_page
+    if image.crop is not None:
+        body["crop"] = list(image.crop)
     return body
 
 
