@@ -20,6 +20,7 @@ from tate.layout import BACKGROUND_HEX, BACKGROUND_RGB
 WEBP_QUALITY = 85
 COVER_WIDTH = 360
 PREVIEW_WIDTH = 480
+WEBP_MAX_DIMENSION = 16383
 
 
 class SegmentRecord(TypedDict):
@@ -92,13 +93,30 @@ def segment_name(index: int) -> str:
 
 def encode_webp(image: Image.Image, *, quality: int = WEBP_QUALITY) -> bytes:
     buffer = io.BytesIO()
-    image.save(buffer, format="WEBP", quality=quality, method=4)
+    try:
+        image.save(buffer, format="WEBP", quality=quality, method=4)
+    except (OSError, ValueError) as exc:
+        raise TateError("could not encode an image") from exc
     return buffer.getvalue()
 
 
 def make_cover(image: Image.Image, cover_width: int = COVER_WIDTH) -> Image.Image:
-    height = max(1, round(image.height * (cover_width / image.width)))
-    return image.resize((cover_width, height), Image.Resampling.LANCZOS)
+    """Scale a segment to `cover_width`. The top is kept if WebP cannot hold the height."""
+    width = max(1, min(cover_width, WEBP_MAX_DIMENSION))
+    height = _scaled_height(image.height, image.width, width)
+    source = image
+    if height > WEBP_MAX_DIMENSION:
+        keep = max(1, int(image.height * WEBP_MAX_DIMENSION / height))
+        source = image.crop((0, 0, image.width, min(image.height, keep)))
+        height = min(WEBP_MAX_DIMENSION, _scaled_height(source.height, source.width, width))
+    resized = source.resize((width, height), Image.Resampling.LANCZOS)
+    if source is not image:
+        source.close()
+    return resized
+
+
+def _scaled_height(src_h: int, src_w: int, width: int) -> int:
+    return max(1, round(src_h * (width / max(1, src_w))))
 
 
 def build_manifest(
