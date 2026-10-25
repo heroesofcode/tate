@@ -3,10 +3,10 @@ import zipfile
 from pathlib import Path
 
 from PIL import Image
-from tests.pages import grid_page, save_jpeg
 
 from tate.detect.page import PageDetector
 from tate.pipeline import process_chapter
+from tests.pages import grid_page, save_jpeg
 
 
 def test_package_matches_the_contract(tmp_path: Path, monkeypatch: object) -> None:
