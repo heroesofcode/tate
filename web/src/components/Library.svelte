@@ -350,11 +350,11 @@
       {/each}
     </ul>
   {/if}
-</div>
 
-{#if dragDepth > 0}
-  <div class="drop">{t('dropHint')}</div>
-{/if}
+  {#if dragDepth > 0}
+    <div class="drop" aria-hidden="true">{t('dropHint')}</div>
+  {/if}
+</div>
 
 <input
   bind:this={fileInput}
