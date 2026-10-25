@@ -3,6 +3,7 @@
   import { isLightBackground } from '../lib/format';
   import { t } from '../lib/i18n';
   import { percentFromProgress, scrollTopFor } from '../lib/progress';
+  import { createScreenWake, createUrlSlots } from '../lib/reader-resources';
   import { libraryHash } from '../lib/route';
   import {
     getChapter,
@@ -23,10 +24,9 @@
   let scroller = $state<HTMLElement | null>(null);
   let hideTimer = 0;
   let restored = false;
-  const live: Record<number, string> = {};
-  const inflight: Record<number, number> = {};
+  const loaded = createUrlSlots();
+  const screenWake = createScreenWake(() => navigator.wakeLock.request('screen'));
   let generation = 0;
-  let wake: WakeLockSentinel | null = null;
 
   const light = $derived(chapter ? isLightBackground(chapter.background) : false);
   const percent = $derived(
@@ -66,29 +66,15 @@
   }
 
   function revoke(index: number) {
-    const url = live[index];
-    if (!url) return;
-    URL.revokeObjectURL(url);
-    live[index] = '';
+    if (!loaded.revoke(index)) return;
     setUrl(index, null);
   }
 
-  function revokeAll() {
-    for (const key of Object.keys(live)) revoke(Number(key));
-  }
-
   async function activate(index: number, gen: number) {
-    if (live[index] || !chapter) return;
-    inflight[index] = gen;
-    const blob = await getSegmentBlob(chapter.id, index);
-    if (inflight[index] !== gen || !blob) return;
-    const url = URL.createObjectURL(blob);
-    if (inflight[index] !== gen) {
-      URL.revokeObjectURL(url);
-      return;
-    }
-    live[index] = url;
-    setUrl(index, url);
+    if (!chapter) return;
+    const id = chapter.id;
+    const url = await loaded.claim(index, gen, () => getSegmentBlob(id, index));
+    if (url) setUrl(index, url);
   }
 
   function nodeTop(root: HTMLElement, node: HTMLElement): number {
@@ -116,12 +102,11 @@
     if (!root) return;
     const gen = ++generation;
     const want = new Set(desired(root));
-    for (const key of Object.keys(live)) {
-      const index = Number(key);
+    for (const index of loaded.indices()) {
       if (!want.has(index)) revoke(index);
     }
     for (const index of want) {
-      if (!live[index]) void activate(index, gen);
+      if (!loaded.has(index)) void activate(index, gen);
     }
   }
 
@@ -162,14 +147,7 @@
 
   async function acquireWake() {
     if (!('wakeLock' in navigator)) return;
-    try {
-      wake = await navigator.wakeLock.request('screen');
-      wake.addEventListener('release', () => {
-        wake = null;
-      });
-    } catch {
-      wake = null;
-    }
+    await screenWake.acquire();
   }
 
   let pointerCount = 0;
@@ -285,14 +263,16 @@
         window.clearTimeout(saveTimer);
         window.clearTimeout(hideTimer);
         if (restored) schedule(true);
-        revokeAll();
         setThemeColor('#0c0c0f');
-        void wake?.release();
+        loaded.close();
+        screenWake.close();
       };
     })();
     return () => {
       cancelled = true;
       stop();
+      loaded.close();
+      screenWake.close();
     };
   });
 </script>
