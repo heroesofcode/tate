@@ -175,7 +175,15 @@ describe('tate packages', () => {
   it('rejects archives that are not zip data', async () => {
     await expect(
       importPackage(file(new Uint8Array([1, 2, 3, 4]), 'nope.tate')),
-    ).rejects.toBeInstanceOf(PackageError);
+    ).rejects.toMatchObject({ code: 'bad_zip' });
+    await expect(
+      importPackage(file(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]), 'cut.tate')),
+    ).rejects.toMatchObject({ code: 'bad_zip' });
+    const emptyZip = new Uint8Array(22);
+    emptyZip.set([0x50, 0x4b, 0x05, 0x06]);
+    await expect(importPackage(file(emptyZip, 'empty.tate'))).rejects.toMatchObject({
+      code: 'missing_manifest',
+    });
   });
 });
 
