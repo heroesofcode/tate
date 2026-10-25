@@ -198,3 +198,12 @@ def test_content_loss_treats_a_dark_page_background_as_paper() -> None:
     assert content_loss(image, color=False, ignore=(), crops=panel) == 0
     assert content_loss(image, color=True, ignore=(), crops=panel) == 0
     assert content_loss(image, color=False, ignore=(), crops=()) == 1
+
+
+def test_content_loss_keeps_white_paper_when_one_edge_is_dark() -> None:
+    image = Image.new("RGB", (100, 100), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 9, 99), fill=(20, 20, 20))
+    draw.rectangle((40, 40, 59, 59), fill=(25, 25, 25))
+    assert content_loss(image, color=False, ignore=(Box(0, 0, 10, 100),), crops=()) == 1
+    assert content_loss(image, color=True, ignore=(Box(0, 0, 10, 100),), crops=()) == 1
