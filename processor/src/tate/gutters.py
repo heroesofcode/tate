@@ -93,15 +93,19 @@ def full_span_divider(
     allow_ink_rule: bool = False,
     page_light: float | None = None,
     search: int = 48,
+    paper_gap: bool = True,
 ) -> bool:
     """True when a frame rule or a paper gap at ``cut`` crosses all of ``box``.
 
     ``axis`` ``"x"`` is a vertical line. ``"y"`` is a horizontal line. The line
     may stop a little short of the box edge. A paper gap, a bright sheet that is
     not the border sample, or a thin dark rule with paper on both sides, counts.
-    ``allow_ink_rule`` also accepts a thin dark band that reaches both edges,
-    which is how a coloured panel is framed when the paint goes up to the rule.
-    ``search`` is how far, in page pixels, that mark may sit from ``cut``.
+    ``paper_gap`` false skips a paper-coloured run and a bright field, which is
+    how a light panel looks. A blank strip walled in by drawing still counts,
+    and so does a thin dark rule. ``allow_ink_rule`` also accepts a
+    thin dark band that reaches both edges, which is how a coloured panel is
+    framed when the paint goes up to the rule. ``search`` is how far, in page
+    pixels, that mark may sit from ``cut``.
     """
     height, width = int(rgb.shape[0]), int(rgb.shape[1])
     x1, y1 = max(0, box.x), max(0, box.y)
@@ -118,24 +122,25 @@ def full_span_divider(
             return False
         view_sheet = sheet[y1:y2, lo:hi]
         view_lum = rgb[y1:y2, lo:hi].astype(np.float32).mean(axis=2)
-        return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light)
+        return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light, paper_gap=paper_gap)
     lo = max(0, cut - band - walk)
     hi = min(height, cut + band + walk + 1)
     if hi - lo < 8 or not (lo <= cut < hi):
         return False
     view_sheet = np.transpose(sheet[lo:hi, x1:x2])
     view_lum = np.transpose(rgb[lo:hi, x1:x2].astype(np.float32).mean(axis=2))
-    return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light)
+    return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light, paper_gap=paper_gap)
 
 
 def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     """Fold a thin fragment into the neighbouring panel when no gutter divides them.
 
     A split that leaves a piece much thinner than a panel is rejected. A narrow
-    cell that really is its own panel stays, because a frame or a paper gap
-    crosses the whole edge between it and its neighbour. Boxes that only touch,
-    or that overlap, are held apart the same way: the mark is sought in a short
-    band around that shared edge.
+    cell that really is its own panel stays, because a frame crosses the shared
+    edge, or a paper gap sits between boxes that are actually apart. Boxes that
+    only touch, or that overlap, have no measured gap. A light interior is
+    paper with ink in it, so it does not keep them apart. A dark frame rule
+    does, and so does a blank strip with solid drawing hard against both sides.
     """
     page_w, page_h = image.size
     current = [panel.clamp(page_w, page_h) for panel in panels if panel.w >= 2 and panel.h >= 2]
@@ -576,6 +581,8 @@ def _divider_view(
     search: int,
     allow_ink_rule: bool,
     page_light: float,
+    *,
+    paper_gap: bool = True,
 ) -> bool:
     """``sheet`` and ``lum`` are shaped (span, along). ``local_cut`` is an index on along."""
     span = int(sheet.shape[0])
@@ -584,14 +591,24 @@ def _divider_view(
         return False
     start = max(0, local_cut - search)
     end = min(along, local_cut + search + 1)
-    window = sheet[:, start:end]
-    if window.size == 0:
-        return False
-    spanning = _span_columns(window)
-    run = _longest_run([bool(flag) for flag in spanning])
-    if run is not None and run[1] - run[0] >= 2 and _ink_both_sides(sheet, start + run[0], start + run[1]):
-        return True
-    if _light_gap_view(lum, start, end, page_light):
+    if paper_gap:
+        window = sheet[:, start:end]
+        if window.size == 0:
+            return False
+        spanning = _span_columns(window)
+        run = _longest_run([bool(flag) for flag in spanning])
+        if (
+            run is not None
+            and run[1] - run[0] >= 2
+            and _ink_both_sides(sheet, start + run[0], start + run[1])
+        ):
+            return True
+        if _light_gap_view(lum, start, end, page_light):
+            return True
+    elif _solid_walled_strip(sheet, start, end):
+        # Touching boxes have no measured gap. A blank strip with drawing hard
+        # against both sides is still a gutter. Paper that fills the band is
+        # the panel, even when ink sits nearby.
         return True
     if _frame_rule_view(sheet, lum, start, end):
         return True
@@ -648,6 +665,55 @@ def _ink_both_sides(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -
         return False
 
     return inky(run_start - 1, -1) and inky(run_end, 1)
+
+
+def _solid_walled_strip(sheet: np.ndarray[Any, Any], start: int, end: int) -> bool:
+    """A blank strip inside the band, with solid drawing against both sides.
+
+    Paper that runs from one side of the band to the other is a light panel.
+    Ink further away, or a few strokes, does not turn that field into a gutter.
+    """
+    if end - start < 5:
+        return False
+    spanning = _span_columns(sheet[:, start:end])
+    index = 0
+    count = int(spanning.shape[0])
+    while index < count:
+        if not bool(spanning[index]):
+            index += 1
+            continue
+        end_run = index
+        while end_run < count and bool(spanning[end_run]):
+            end_run += 1
+        width = end_run - index
+        if (
+            2 <= width <= 48
+            and index > 0
+            and end_run < count
+            and _solid_walls(sheet, start + index, start + end_run)
+        ):
+            return True
+        index = end_run
+    return False
+
+
+def _solid_walls(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -> bool:
+    """Drawing, not a stroke, sits hard against both sides of the strip."""
+    along = int(sheet.shape[1])
+
+    def wall(origin: int, direction: int) -> bool:
+        columns: list[int] = []
+        for delta in range(4):
+            column = origin + direction * delta
+            if column < 0 or column >= along:
+                break
+            columns.append(column)
+        if len(columns) < 2:
+            return False
+        left, right = min(columns), max(columns) + 1
+        return float((~sheet[:, left:right]).mean()) >= 0.62
+
+    return wall(run_start - 1, -1) and wall(run_end, 1)
 
 
 def _light_gap_view(lum: np.ndarray[Any, Any], start: int, end: int, page_light: float) -> bool:
@@ -816,10 +882,13 @@ def _gutter_between(
 ) -> bool:
     """True when a frame rule or a paper gap divides ``small`` from ``big``.
 
-    A positive gap is the gutter already measured between the boxes. Boxes that
-    touch or overlap have no such gap, so the mark has to sit on the shared
-    edge. Only a short band around that edge is searched: a rule further inside
-    either drawing is not what divides them.
+    A positive gap is the gutter already measured between the boxes, so a paper
+    gap there still counts. Boxes that touch or overlap have no such gap. A
+    paper-coloured run with ink nearby is the interior of a light panel, not a
+    divider. A thin dark frame rule on the shared edge keeps them apart, and so
+    does a blank strip with solid drawing hard against both sides. The mark is
+    sought in a short band: anything further inside either drawing is not the
+    edge between them.
     """
     gap = _axis_gap(small, big, axis)
     if gap > 0:
@@ -830,7 +899,7 @@ def _gutter_between(
     page_span = page_w if axis == "x" else page_h
     band = max(8, min(24, round(page_span * 0.015)))
     for cut in _contact_cuts(small, big, axis):
-        if full_span_divider(rgb, sheet, parent, axis, cut, page_light=light, search=band):
+        if full_span_divider(rgb, sheet, parent, axis, cut, page_light=light, search=band, paper_gap=False):
             return True
     return False
 
