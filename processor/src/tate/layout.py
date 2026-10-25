@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from tate.balloons import find_balloons
 from tate.boxes import (
     Box,
     Detection,
@@ -124,9 +125,10 @@ def expand_for_text(
     page_w: int,
     page_h: int,
 ) -> list[Box]:
-    """Grow every panel that substantially overlaps a text box, so the balloon survives.
+    """Grow the one panel that owns each text or balloon, so the mark is not sliced.
 
-    A text box that sits in no panel is attached to the nearest one.
+    The owner is the panel that already covers the most of the mark. A mark that
+    sits in no panel is attached to the nearest one. Two panels never share it.
     """
     original = [panel.clamp(page_w, page_h) for panel in panels]
     expanded = list(original)
@@ -136,16 +138,39 @@ def expand_for_text(
         text_box = text.clamp(page_w, page_h)
         if text_box.area <= 0:
             continue
-        owners = [
-            index
-            for index, panel in enumerate(original)
-            if intersection_area(panel, text_box) / text_box.area >= TEXT_OVERLAP
-        ]
-        if not owners:
-            owners = [min(range(len(original)), key=lambda index: box_distance(original[index], text_box))]
-        for index in owners:
-            expanded[index] = union_box(expanded[index], text_box).clamp(page_w, page_h)
+        overlaps = [intersection_area(panel, text_box) / text_box.area for panel in original]
+        best = max(range(len(original)), key=lambda index: overlaps[index])
+        if overlaps[best] < TEXT_OVERLAP:
+            best = min(range(len(original)), key=lambda index: box_distance(original[index], text_box))
+        expanded[best] = union_box(expanded[best], text_box).clamp(page_w, page_h)
     return expanded
+
+
+def regions_to_keep(
+    texts: Sequence[Box],
+    balloons: Sequence[Box],
+    page_w: int,
+    page_h: int,
+) -> list[Box]:
+    """Balloon outlines plus text the outline finder did not already cover.
+
+    A text box is the letters only. Padding it pulls the outline and the tail
+    into the same crop when the classical finder did not see a closed balloon.
+    """
+    covered: set[int] = set()
+    for balloon in balloons:
+        if balloon.area <= 0:
+            continue
+        for index, text in enumerate(texts):
+            if text.area > 0 and intersection_area(text, balloon) / text.area >= 0.5:
+                covered.add(index)
+    pad = max(8, round(min(page_w, page_h) * 0.018))
+    kept = [
+        Box(text.x - pad, text.y - pad, text.w + 2 * pad, text.h + 2 * pad).clamp(page_w, page_h)
+        for index, text in enumerate(texts)
+        if index not in covered and text.area > 0
+    ]
+    return [*balloons, *kept]
 
 
 def pad_box(box: Box, page_w: int, page_h: int) -> Box:
@@ -201,6 +226,7 @@ def layout_page(
     """
     page_w, page_h = image.size
     texts = prepare_texts(detection.texts, page_w, page_h)
+    regions = regions_to_keep(texts, find_balloons(image), page_w, page_h)
     base = _panels_before_recovery(image, detection.panels)
     spread = _is_spread(page_w, page_h, base)
     cleaned = base if spread else _recover_panels(image, base)
@@ -214,11 +240,11 @@ def layout_page(
             fallback=not spread,
             spread=spread,
         )
-    expanded = expand_for_text(cleaned, texts, page_w, page_h)
+    expanded = expand_for_text(cleaned, regions, page_w, page_h)
     # Crops, not the panel boxes, grow to meet so ink outside every frame
     # (a margin, a caption, a balloon that crosses a border) is still emitted.
     expanded = cover_boxes(expanded, page_w, page_h)
-    expanded = expand_for_text(expanded, texts, page_w, page_h)
+    expanded = expand_for_text(expanded, regions, page_w, page_h)
     order = reading_order(cleaned, direction)
     segments: list[SegmentDraft] = []
     used: list[Box] = []
