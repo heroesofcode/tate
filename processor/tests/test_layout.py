@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 from tate.boxes import Box, Detection, clean_panels, drop_slivers, separate_overlaps
 from tate.debug import draw_debug
 from tate.detect.page import PageDetector
-from tate.gutters import split_on_gutters
+from tate.gutters import _valley_shoulders, split_on_gutters
 from tate.ink import cover_boxes
 from tate.layout import (
     MAX_SEGMENT_HEIGHT,
@@ -484,6 +484,24 @@ def test_a_merged_strip_is_split_along_the_gutters() -> None:
     assert laid.spread is False
     assert laid.fallback is False
     assert len(laid.segments) == 6
+
+
+def test_a_frame_rule_between_two_cells_is_a_gutter() -> None:
+    image = Image.new("RGB", (600, 400), (210, 190, 160))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 20, 280, 360), outline=(0, 0, 0), width=4)
+    draw.rectangle((300, 20, 560, 360), outline=(0, 0, 0), width=4)
+    draw.rectangle((50, 80, 140, 180), fill=(0, 0, 0))
+    draw.rectangle((360, 80, 460, 180), fill=(0, 0, 0))
+    parts = split_on_gutters(image, [Box(20, 20, 540, 340)])
+    assert len(parts) == 2
+    assert parts[0].x2 <= parts[1].x
+
+
+def test_a_hairline_gap_is_a_gutter_only_beside_a_solid_drawing() -> None:
+    assert _valley_shoulders("valley", 1, 0.20, 0.20) is False
+    assert _valley_shoulders("valley", 1, 0.90, 0.20) is True
+    assert _valley_shoulders("valley", 8, 0.20, 0.20) is True
 
 
 def test_a_stroke_through_a_drawing_is_not_a_gutter() -> None:

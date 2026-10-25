@@ -1,9 +1,10 @@
 """Split a box that covers several panels along the gutters between them.
 
-A gutter is either a band of paper with drawings on both sides, or a thin rule
-whose shoulders are paper. Cuts are searched inside one row at a time, because
-a vertical rule usually stops at the horizontal gutter. Nothing here is tuned
-to a particular page: a cut is kept only when both pieces are large and inky.
+A gutter is either a band of paper with drawings on both sides, or a thin dark
+rule whose shoulders are paper. A hairline white gap is not a gutter. Cuts are
+searched inside one row at a time, because a vertical rule usually stops at the
+horizontal gutter. Nothing here is tuned to a particular page: a cut is kept
+only when both pieces are large and inky.
 """
 
 from __future__ import annotations
@@ -79,6 +80,7 @@ def _cuts(
     span = mask_h if axis == 0 else mask_w
     found = _clusters(valleys, frac, span, scale, page_span, kind="valley")
     found.extend(_shoulder_rules(view_lum, view_dark, paper, axis, scale, page_span))
+    found.extend(_frame_rules(view_lum, paper, axis))
     cuts = sorted({origin + round(index / scale) for index in found})
     return _dedupe(cuts, max(8, round(page_span * 0.03)))
 
@@ -155,6 +157,62 @@ def _shoulder_rules(
     return kept
 
 
+def _frame_rules(lum: np.ndarray[Any, Any], paper: float, axis: int) -> list[int]:
+    """A thin dark rule with paper on both sides, even when the rule is thick.
+
+    The ridge test looks only a few pixels away, so a rule of several pixels
+    reads as flat black and is missed. This measures the dark column itself
+    and the paper beside it.
+    """
+    dark = lum < paper - 30.0
+    if axis == 0:
+        frac = dark.mean(axis=1)
+        span = int(frac.shape[0])
+    else:
+        frac = dark.mean(axis=0)
+        span = int(frac.shape[0])
+    gap = max(3, round(span * 0.02))
+    found: list[int] = []
+    index = 0
+    while index < span:
+        if float(frac[index]) <= 0.52:
+            index += 1
+            continue
+        end = index
+        while end < span and float(frac[end]) > 0.52:
+            end += 1
+        thick = end - index
+        interior = 1 <= thick <= 6 and index > gap and end < span - gap
+        if interior and _paper_shoulders(lum, paper, axis, index, end, gap):
+            found.append((index + end) // 2)
+        index = end
+    return found
+
+
+def _paper_shoulders(
+    lum: np.ndarray[Any, Any],
+    paper: float,
+    axis: int,
+    start: int,
+    end: int,
+    gap: int,
+) -> bool:
+    level = paper - 18.0
+    if axis == 0:
+        above = lum[max(0, start - gap) : start]
+        below = lum[end : end + gap]
+        return _mostly_paper(above, level) and _mostly_paper(below, level)
+    left = lum[:, max(0, start - gap) : start]
+    right = lum[:, end : end + gap]
+    return _mostly_paper(left, level) and _mostly_paper(right, level)
+
+
+def _mostly_paper(patch: np.ndarray[Any, Any], level: float) -> bool:
+    if patch.size == 0:
+        return False
+    return float((patch > level).mean()) >= 0.60
+
+
 def _clusters(
     mask: np.ndarray[Any, Any],
     frac: np.ndarray[Any, Any],
@@ -182,11 +240,24 @@ def _clusters(
             center = (index + end) // 2
             above = float(frac[max(0, index - side) : index].mean()) if index else 0.0
             below = float(frac[end : min(span, end + side)].mean()) if end < span else 0.0
-            need = 0.1 if kind == "valley" else 0.06
-            if above >= need and below >= need:
+            if _valley_shoulders(kind, thick, above, below):
                 found.append(center)
         index = end
     return found
+
+
+def _valley_shoulders(kind: str, thick: int, above: float, below: float) -> bool:
+    """A white gap needs drawings on both sides.
+
+    A gap only a few pixels wide also needs one solid drawing beside it, so a
+    scratch inside a picture is not a gutter. A wider band of paper can sit
+    next to sparser line art.
+    """
+    if kind != "valley":
+        return above >= 0.06 and below >= 0.06
+    if thick <= 3:
+        return min(above, below) >= 0.15 and max(above, below) >= 0.55
+    return above >= 0.15 and below >= 0.15
 
 
 def _dedupe(cuts: list[int], gap: int) -> list[int]:
