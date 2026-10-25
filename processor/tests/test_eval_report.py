@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from tate.boxes import Box
+from tate.boxes import Box, Detection
 from tate.cli import main
 from tate.errors import TateError
 from tate.eval.check import judge, load_thresholds
@@ -208,6 +208,94 @@ def test_cv_scores_in_a_process_pool(tmp_path: Path) -> None:
     )
     scores = evaluate(load_dataset(dataset), cache=cache, detectors=["cv"], subset="ci", jobs=2)
     assert [page.page_id for page in scores["cv"]] == ["one", "two"]
+
+
+def test_ltr_work_is_scored_in_ltr_order(tmp_path: Path) -> None:
+    from tate.eval.dataset import load_dataset
+    from tate.eval.run import evaluate
+
+    class _Panels:
+        name = "cv"
+
+        def detect(self, image: Image.Image) -> Detection:
+            return Detection(
+                (
+                    Box(20, 20, 160, 180),
+                    Box(220, 20, 160, 180),
+                    Box(20, 260, 160, 180),
+                    Box(220, 260, 160, 180),
+                ),
+                (),
+            )
+
+    dataset = tmp_path / "dataset"
+    cache = tmp_path / "cache" / "pages"
+    (dataset / "pages").mkdir(parents=True)
+    cache.mkdir(parents=True)
+    image = Image.new("RGB", (400, 480), "white")
+    pen = ImageDraw.Draw(image)
+    for box in ((20, 20, 180, 200), (220, 20, 380, 200), (20, 260, 180, 440), (220, 260, 380, 440)):
+        pen.rectangle(box, fill=(40, 40, 40))
+    image.save(cache / "west.png")
+    image.close()
+    (dataset / "sources.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "local",
+                    "title": "Local",
+                    "author": "A",
+                    "license": "MIT",
+                    "license_url": "https://example.com/license",
+                    "attribution": "Local by A",
+                    "homepage": "https://example.com",
+                    "fetch": {"kind": "image", "url": "https://example.com/a.png", "sha256": "ab" * 32},
+                }
+            ]
+        )
+        + "\n"
+    )
+    (dataset / "pages" / "west.json").write_text(
+        json.dumps(
+            {
+                "work": "west",
+                "title": "West",
+                "direction": "ltr",
+                "pages": [
+                    {
+                        "id": "west",
+                        "styles": ["ltr"],
+                        "image": {"source": "local"},
+                        "size": [400, 480],
+                        "panels": [
+                            {"box": [20, 20, 180, 200]},
+                            {"box": [220, 20, 380, 200]},
+                            {"box": [20, 260, 180, 440]},
+                            {"box": [220, 260, 380, 440]},
+                        ],
+                        "whole": False,
+                        "balloons": [],
+                        "ci": True,
+                    }
+                ],
+            }
+        )
+        + "\n"
+    )
+    scores = evaluate(
+        load_dataset(dataset),
+        cache=tmp_path / "cache",
+        detectors=["cv"],
+        subset="ci",
+        jobs=1,
+        instances={"cv": _Panels()},
+    )
+    page = scores["cv"][0]
+    assert page.page_id == "west"
+    assert page.order_exact is True
+    assert page.wrong_order is False
+    assert page.kendall_tau == 1
+    assert [box.x for box in page.pred_panels] == [20, 220, 20, 220]
 
 
 def test_eval_cli_check_and_diff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
