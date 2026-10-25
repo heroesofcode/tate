@@ -26,10 +26,17 @@ def reading_order(boxes: Sequence[Box], direction: ReadingDirection = "rtl") -> 
         boxes = [_mirror_x(box) for box in boxes]
     elif direction != "rtl":
         raise ValueError("direction must be rtl or ltr")
-    indices = list(range(len(boxes)))
-    if len(indices) <= 1:
-        return indices
-    return _order(indices, boxes, _tolerance(boxes))
+    if len(boxes) <= 1:
+        return list(range(len(boxes)))
+    # Work on the boxes in one canonical order so that ties (equal edges,
+    # equal boxes) never depend on the order the detector listed them in.
+    canonical = sorted(range(len(boxes)), key=lambda index: _box_key(boxes[index]))
+    ordered = _order(list(range(len(canonical))), [boxes[index] for index in canonical], _tolerance(boxes))
+    return [canonical[index] for index in ordered]
+
+
+def _box_key(box: Box) -> tuple[int, int, int, int, float]:
+    return (box.y, box.x, box.h, box.w, box.score)
 
 
 def _mirror_x(box: Box) -> Box:

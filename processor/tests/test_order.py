@@ -106,3 +106,11 @@ def test_staircase_falls_back_to_rows() -> None:
         Box(0, 160, 210, 80),
     ]
     assert reading_order(boxes) == [1, 0, 2]
+
+
+def test_equal_boxes_keep_one_order_whatever_the_input_order() -> None:
+    a = Box(0, 0, 10, 10, 0.2)
+    b = Box(0, 0, 10, 10, 0.9)
+    first = [[a, b][index] for index in reading_order([a, b])]
+    second = [[b, a][index] for index in reading_order([b, a])]
+    assert first == second
