@@ -82,6 +82,17 @@ def test_reading_order_is_a_permutation(boxes: list[Box]) -> None:
     assert sorted(reading_order(boxes, "ltr")) == list(range(len(boxes)))
 
 
+@given(st.lists(_loose_box(), min_size=1, max_size=8))
+def test_reading_order_does_not_depend_on_input_order(boxes: list[Box]) -> None:
+    order = [boxes[index] for index in reading_order(boxes)]
+    perm = list(range(len(boxes)))
+    # A fixed rotation, so the test stays deterministic per example.
+    perm = perm[1:] + perm[:1]
+    shuffled = [boxes[index] for index in perm]
+    again = [shuffled[index] for index in reading_order(shuffled)]
+    assert again == order
+
+
 @given(st.lists(_loose_box(), max_size=8))
 def test_ltr_order_matches_rtl_of_mirrored_boxes(boxes: list[Box]) -> None:
     mirrored = [_mirror_x(box) for box in boxes]

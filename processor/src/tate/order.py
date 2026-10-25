@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Sequence
 from typing import Literal
 
@@ -14,13 +15,15 @@ def reading_order(boxes: Sequence[Box], direction: ReadingDirection = "rtl") -> 
     """Return indices of `boxes` in reading order.
 
     Horizontal gutters are cut first (top band, then the band below). When a
-    panel is tall enough to block that cut, the page is cut into columns.
-    Side-by-side strips are the exception: if every column is a stack of four
-    or more panels, each strip is finished before the next. ``rtl`` reads the
-    right column first; ``ltr`` reads the left column first.
+    panel is tall enough to block that cut, or a slanted gutter makes the
+    boxes overlap, the page is cut into columns and the starting column is
+    finished first. Side-by-side strips are the exception: if every column is
+    a stack of four or more panels, each strip is finished before the next.
+    ``rtl`` reads the right column first; ``ltr`` reads the left column first.
     ``ltr`` is ``rtl`` on boxes mirrored in x, so both directions share one
-    algorithm. Small overlaps are ignored so a detector that bleeds across a
-    gutter still produces a clean cut.
+    algorithm. Small overlaps and corner bleeds are ignored so a detector that
+    crosses a gutter still produces a clean cut. An inset is read with the
+    row it sits in.
     """
     if direction == "ltr":
         boxes = [_mirror_x(box) for box in boxes]
@@ -65,12 +68,25 @@ def _order(indices: list[int], boxes: Sequence[Box], tolerance: int) -> list[int
         for group in horizontal:
             ordered.extend(_order(group, boxes, tolerance))
         return ordered
+    # A detector that bleeds across a row gutter closes the normal gap. A
+    # wider shrink still finds the rows, and is preferred to cutting columns.
+    loose = _loose_tolerance(indices, boxes)
+    if loose > tolerance:
+        bled = _groups_by_gaps(indices, boxes, "y", loose)
+        if bled is not None and _bands_only_bleed(bled, boxes):
+            ordered = []
+            for group in bled:
+                ordered.extend(_order(group, boxes, tolerance))
+            return ordered
     vertical = _groups_by_gaps(indices, boxes, "x", tolerance)
     if vertical is not None:
         ordered = []
         for group in reversed(vertical):
             ordered.extend(_order(group, boxes, tolerance))
         return ordered
+    blocked = _blocked_stack(indices, boxes)
+    if blocked is not None:
+        return blocked
     return _rows(indices, boxes)
 
 
@@ -135,18 +151,201 @@ def _column_stacks(
 
     A normal row of two or three panels is left to the horizontal cut. A strip
     page is the case where every column separates into four or more single
-    panels, so the reader finishes one strip before the next.
+    panels, so the reader finishes one strip before the next. The gutters may
+    be closed by boxes that bleed a little; a wider shrink still sees them.
     """
-    columns = _groups_by_gaps(indices, boxes, "x", tolerance)
+    loose = max(tolerance, _loose_tolerance(indices, boxes))
+    columns = _groups_by_gaps(indices, boxes, "x", loose)
     if columns is None or len(columns) < 2:
         return None
     if any(len(column) < 4 for column in columns):
         return None
+    if not _columns_share_an_edge(columns, boxes):
+        return None
     for column in columns:
-        rows = _groups_by_gaps(column, boxes, "y", tolerance)
+        rows = _groups_by_gaps(column, boxes, "y", loose)
         if rows is None or len(rows) < 4 or any(len(row) != 1 for row in rows):
             return None
     return columns
+
+
+def _columns_share_an_edge(columns: Sequence[Sequence[int]], boxes: Sequence[Box]) -> bool:
+    """A strip's frames line up. A wide panel that only overlaps after shrinking does not."""
+    for column in columns:
+        starts = sorted(boxes[index].x for index in column)
+        widths = sorted(boxes[index].w for index in column)
+        median_x = starts[len(starts) // 2]
+        median_w = max(1, widths[len(widths) // 2])
+        limit = max(24, int(median_w * 0.06))
+        if any(abs(start - median_x) > limit for start in starts):
+            return False
+    return True
+
+
+def _bands_only_bleed(groups: Sequence[Sequence[int]], boxes: Sequence[Box]) -> bool:
+    """A loose row cut is only a bleed when neighbouring bands barely overlap.
+
+    A panel that reaches well into the band below is a column, not a torn edge,
+    and the row cut would put it in the wrong place.
+    """
+    for upper, lower in itertools.pairwise(groups):
+        for left in upper:
+            for right in lower:
+                overlap = _overlap_1d(boxes[left].y, boxes[left].y2, boxes[right].y, boxes[right].y2)
+                shorter = min(boxes[left].h, boxes[right].h)
+                if _ratio(overlap, shorter) > 0.28:
+                    return False
+    return True
+
+
+def _loose_tolerance(indices: Sequence[int], boxes: Sequence[Box]) -> int:
+    heights = sorted(boxes[index].h for index in indices)
+    median = heights[len(heights) // 2]
+    return max(2, int(median * 0.12))
+
+
+def _overlap_1d(start_a: int, end_a: int, start_b: int, end_b: int) -> int:
+    return max(0, min(end_a, end_b) - max(start_a, start_b))
+
+
+def _ratio(overlap: int, length: int) -> float:
+    if length <= 0:
+        return 0.0
+    return overlap / length
+
+
+def _blocked_stack(indices: list[int], boxes: Sequence[Box]) -> list[int] | None:
+    """Order a column that a neighbouring panel overlaps, so the row cut is ambiguous.
+
+    A stack is two panels one above the other in the same column. A panel beside
+    that stack which reaches into both of them blocks a horizontal cut (a tall
+    panel, or a slanted gutter whose boxes overlap). The stack is read from the
+    starting side: the right stack before a left blocker, or a right blocker
+    before the stack on its left. Blockers on both sides are left to row order.
+    """
+    best: tuple[tuple[int, int, int], list[int], list[int], list[int]] | None = None
+    for upper in indices:
+        for lower in indices:
+            if upper == lower:
+                continue
+            top, bottom = boxes[upper], boxes[lower]
+            if top.y > bottom.y:
+                continue
+            x_overlap = _overlap_1d(top.x, top.x2, bottom.x, bottom.x2)
+            if _ratio(x_overlap, min(top.w, bottom.w)) < 0.55:
+                continue
+            y_overlap = _overlap_1d(top.y, top.y2, bottom.y, bottom.y2)
+            if y_overlap > 0.35 * min(top.h, bottom.h) and bottom.y < top.y2:
+                continue
+            if bottom.y > top.y2 + max(top.h, bottom.h):
+                continue
+            cut = _stack_cut(top, bottom, y_overlap)
+            above, below, blockers = _split_at_cut(indices, boxes, upper, lower, cut)
+            if not above or not below:
+                continue
+            if not _blockers_on_one_side(boxes, upper, lower, blockers):
+                continue
+            # Panels sitting fully above or below this stack belong to another
+            # band. A y-gap should have separated them; if they are still here
+            # this pair is not the cut for the whole group.
+            if any(not _overlaps_stack(boxes[index], boxes[upper], boxes[lower]) for index in indices):
+                continue
+            # Prefer a cut that actually has a blocker, then the one that
+            # separates the most panels, then the highest cut on the page.
+            rank = (1 if blockers else 0, len(above) + len(below), -cut)
+            if best is None or rank > best[0]:
+                best = (rank, above, below, blockers)
+    if best is None:
+        return None
+    _, above, below, blockers = best
+    if not blockers:
+        return None
+    ordered = _order_blocked(above, below, blockers, boxes)
+    if len(ordered) != len(indices) or len(set(ordered)) != len(indices):
+        return None
+    return ordered
+
+
+def _stack_cut(top: Box, bottom: Box, y_overlap: int) -> int:
+    if y_overlap > 0:
+        return (max(top.y, bottom.y) + min(top.y2, bottom.y2)) // 2
+    return (top.y2 + bottom.y) // 2
+
+
+def _split_at_cut(
+    indices: Sequence[int],
+    boxes: Sequence[Box],
+    upper: int,
+    lower: int,
+    cut: int,
+) -> tuple[list[int], list[int], list[int]]:
+    above: list[int] = []
+    below: list[int] = []
+    blockers: list[int] = []
+    for index in indices:
+        if index == upper:
+            above.append(index)
+            continue
+        if index == lower:
+            below.append(index)
+            continue
+        box = boxes[index]
+        center = box.y + box.h / 2
+        into_lower = _reaches(box, boxes[lower])
+        into_upper = _reaches(box, boxes[upper])
+        reaches_across = (center < cut and into_lower) or (center >= cut and into_upper)
+        if reaches_across:
+            blockers.append(index)
+        elif center < cut:
+            above.append(index)
+        else:
+            below.append(index)
+    return above, below, blockers
+
+
+def _overlaps_stack(box: Box, upper: Box, lower: Box) -> bool:
+    stack_top = min(upper.y, lower.y)
+    stack_bottom = max(upper.y2, lower.y2)
+    return _overlap_1d(box.y, box.y2, stack_top, stack_bottom) > 0
+
+
+def _reaches(box: Box, other: Box) -> bool:
+    """True when `box` overlaps `other` from the side, not as the same column."""
+    y_overlap = _overlap_1d(box.y, box.y2, other.y, other.y2)
+    x_overlap = _overlap_1d(box.x, box.x2, other.x, other.x2)
+    return _ratio(y_overlap, min(box.h, other.h)) > 0.2 and _ratio(x_overlap, min(box.w, other.w)) < 0.45
+
+
+def _blockers_on_one_side(
+    boxes: Sequence[Box],
+    upper: int,
+    lower: int,
+    blockers: Sequence[int],
+) -> bool:
+    if not blockers:
+        return True
+    stack_x = (min(boxes[upper].x, boxes[lower].x) + max(boxes[upper].x2, boxes[lower].x2)) / 2
+    sides = [(boxes[index].x + boxes[index].w / 2) < stack_x for index in blockers]
+    return all(sides) or not any(sides)
+
+
+def _order_blocked(
+    above: list[int],
+    below: list[int],
+    blockers: list[int],
+    boxes: Sequence[Box],
+) -> list[int]:
+    stack = above + below
+    stack_x = sum(boxes[index].x + boxes[index].w / 2 for index in stack) / len(stack)
+    blocker_x = sum(boxes[index].x + boxes[index].w / 2 for index in blockers) / len(blockers)
+    tolerance = _tolerance([boxes[index] for index in above + below + blockers])
+    # Right-hand blockers are the starting column. Left-hand blockers wait
+    # until the stack they overlap has been read.
+    groups = (blockers, above, below) if blocker_x > stack_x else (above, below, blockers)
+    ordered: list[int] = []
+    for group in groups:
+        ordered.extend(_order(group, boxes, tolerance))
+    return ordered
 
 
 def _vertical_overlap(a: Box, b: Box) -> float:
