@@ -180,3 +180,10 @@ def test_style_breakdown_and_percentile() -> None:
     assert styles["dense"].panel_f1_50 < 1
     assert percentile([1, 2, 3, 4], 0.5) == 2.5
     assert percentile([10], 0.95) == 10
+
+
+def test_f1_is_zero_on_a_complete_miss_and_one_when_empty() -> None:
+    assert Counts(0, 2, 3).f1 == 0.0
+    assert Counts(0, 0, 4).f1 == 0.0
+    assert Counts(0, 0, 0).f1 == 1.0
+    assert Counts(2, 0, 0).f1 == 1.0

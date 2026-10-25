@@ -46,10 +46,12 @@ class Counts:
 
     @property
     def f1(self) -> float:
+        if self.tp + self.fp + self.fn == 0:
+            return 1.0
         precision = self.precision
         recall = self.recall
         if precision + recall == 0:
-            return 1.0
+            return 0.0
         return 2 * precision * recall / (precision + recall)
 
     def add(self, other: Counts) -> Counts:
