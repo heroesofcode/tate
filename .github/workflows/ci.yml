@@ -1,0 +1,157 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: processor
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: ${{ github.workspace }}/processor
+      - name: Lint
+        run: |
+          uv run --frozen ruff check
+          uv run --frozen ruff format --check
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: processor
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: ${{ github.workspace }}/processor
+      - name: Typecheck
+        run: uv run --frozen mypy src
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: processor
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          working-directory: ${{ github.workspace }}/processor
+      - name: Test
+        run: uv run --frozen pytest
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: processor
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: ${{ github.workspace }}/processor
+      - name: Build the wheel and process a synthetic chapter
+        run: |
+          set -euo pipefail
+          uv build --out-dir "$RUNNER_TEMP/dist"
+          uv venv --python 3.12 "$RUNNER_TEMP/venv"
+          uv pip install --python "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/dist"/*.whl
+          "$RUNNER_TEMP/venv/bin/tate" --help
+          OUT="$RUNNER_TEMP" "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          from PIL import Image, ImageDraw
+
+          root = Path(os.environ["OUT"])
+          image = Image.new("RGB", (640, 880), "white")
+          draw = ImageDraw.Draw(image)
+          panels = (
+              (30, 30, 290, 400, (210, 210, 210)),
+              (330, 30, 600, 400, (190, 190, 190)),
+              (30, 450, 290, 840, (170, 170, 170)),
+              (330, 450, 600, 840, (150, 150, 150)),
+          )
+          for left, top, right, bottom, fill in panels:
+              draw.rectangle((left, top, right, bottom), fill=fill, outline=(0, 0, 0), width=8)
+          page = root / "page.jpg"
+          image.save(page, format="JPEG", quality=90)
+          with zipfile.ZipFile(root / "sample.cbz", "w") as archive:
+              archive.write(page, "page.jpg")
+          PY
+          "$RUNNER_TEMP/venv/bin/tate" process "$RUNNER_TEMP/sample.cbz" \
+            -o "$RUNNER_TEMP/sample.tate" \
+            --detector cv \
+            --quiet
+          test -s "$RUNNER_TEMP/sample.tate"
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: processor
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.12"
+          enable-cache: true
+          working-directory: ${{ github.workspace }}/processor
+      - name: Audit locked requirements
+        run: |
+          set -euo pipefail
+          uv export --frozen --no-dev --no-emit-project --format requirements.txt \
+            --output-file "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit --requirement "$RUNNER_TEMP/requirements.txt"
