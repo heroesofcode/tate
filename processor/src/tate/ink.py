@@ -91,6 +91,11 @@ def recover_regions(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     )
     count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(closed, connectivity=8)
     page_area = page_w * page_h
+    # Ink spilling out of a frame has no real gutter. A block that is already
+    # panel-sized is judged on its strokes, then grown: expansion across blank
+    # paper runs into the neighbour and would make a normal gutter look closed.
+    # A smaller mark is judged after growth, so a speck is not promoted.
+    gap = max(8, round(min(page_w, page_h) * 0.012))
     found: list[Box] = []
     for label in range(1, int(count)):
         x, y, bw, bh, area = (int(value) for value in stats[label])
@@ -98,19 +103,14 @@ def recover_regions(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
             continue
         box = _to_page(x, y, bw, bh, scale, page_w, page_h)
         grown = _grow_to_frame(stroke, x, y, bw, bh, covered, scale, page_w, page_h)
-        box = grown if grown.area > box.area else box
-        if box.area < page_area * 0.02:
+        expanded = grown if grown.area > box.area else box
+        judged = box if _panel_sized(box, page_w, page_h, page_area) else expanded
+        if any(box_distance(judged, panel) < gap for panel in panels):
             continue
-        if box.w < page_w * 0.04 or box.h < page_h * 0.06:
-            continue
-        if box.area > page_area * 0.55:
+        box = expanded
+        if not _panel_sized(box, page_w, page_h, page_area):
             continue
         if _contains_center(box, panels):
-            continue
-        # Ink that merely spills out of a frame is not a new panel. A missed
-        # panel sits across a gutter, with paper between it and its neighbours.
-        gap = max(8, round(min(page_w, page_h) * 0.012))
-        if any(box_distance(box, panel) < gap for panel in panels):
             continue
         if any(_same(box, other) for other in found):
             continue
@@ -232,6 +232,12 @@ def _grow_to_frame(
             break
         x2 += 1
     return _to_page(x1, y1, max(1, x2 - x1), max(1, y2 - y1), scale, page_w, page_h)
+
+
+def _panel_sized(box: Box, page_w: int, page_h: int, page_area: int) -> bool:
+    return (
+        page_area * 0.02 <= box.area <= page_area * 0.55 and box.w >= page_w * 0.04 and box.h >= page_h * 0.06
+    )
 
 
 def _to_page(x: int, y: int, bw: int, bh: int, scale: float, page_w: int, page_h: int) -> Box:
