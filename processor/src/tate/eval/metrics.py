@@ -388,11 +388,17 @@ def ink_masks(
     height, width = int(rgb.shape[0]), int(rgb.shape[1])
     luminance = _luminance(rgb)
     ink = luminance < INK_LUMINANCE
-    if color:
-        paper = _paper_color(rgb)
+    paper = _paper_color(rgb)
+    paper_dark = float(0.299 * paper[0] + 0.587 * paper[1] + 0.114 * paper[2]) < INK_LUMINANCE
+    if color or paper_dark:
         delta = rgb.astype(np.float64) - paper
         distance = np.sqrt(np.square(delta).sum(axis=2))
-        ink = np.logical_or(ink, distance > PAPER_DISTANCE)
+        away = distance > PAPER_DISTANCE
+        # On a dark page background the gutters are dark too; only pixels that
+        # differ from that background are content.
+        ink = np.logical_and(ink, away) if paper_dark else ink
+        if color:
+            ink = np.logical_or(ink, away)
     _clear_margin(ink, width, height)
     for box in ignore:
         _fill(ink, box, False)
