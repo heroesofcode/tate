@@ -407,14 +407,14 @@ def _rule_border(gray: np.ndarray[Any, Any], panel: Box, level: float) -> bool:
     if x2 - x1 < 8 or y2 - y1 < 8:
         return False
     # The rule sits on the boundary, often just outside the open interior.
+    # Each strip is shaped (along the edge, across the border).
     reach = 8
     inset = 3
-    sides = (
-        gray[y1:y2, max(0, x1 - reach) : min(width, x1 + inset)],
-        gray[y1:y2, max(0, x2 - inset) : min(width, x2 + reach)],
-        gray[max(0, y1 - reach) : min(height, y1 + inset), x1:x2],
-        gray[max(0, y2 - inset) : min(height, y2 + reach), x1:x2],
-    )
+    left = gray[y1:y2, max(0, x1 - reach) : min(width, x1 + inset)]
+    right = gray[y1:y2, max(0, x2 - inset) : min(width, x2 + reach)]
+    top = gray[max(0, y1 - reach) : min(height, y1 + inset), x1:x2]
+    bottom = gray[max(0, y2 - inset) : min(height, y2 + reach), x1:x2]
+    sides = (left, right, top.T, bottom.T)
     edge_x = max(2, int(width * 0.02))
     edge_y = max(2, int(height * 0.02))
     on_edge = (
@@ -431,18 +431,26 @@ def _rule_border(gray: np.ndarray[Any, Any], panel: Box, level: float) -> bool:
 
 
 def _edge_is_dark(side: np.ndarray[Any, Any], level: float) -> bool:
+    """True when one line of ``side`` is a printed rule.
+
+    ``side`` is shaped (along the edge, across the border). The darkest pixel
+    across that border is not a rule: artwork just inside the panel would
+    close every gap, and a missed panel would then be left where it is.
+    """
     if side.size == 0:
         return False
-    if side.ndim < 2 or min(side.shape) <= 1:
+    if side.ndim != 2 or side.shape[1] <= 1 or side.shape[0] < 8:
         return float(np.mean(side < level)) > 0.45
-    thickness = int(np.argmin(side.shape))
-    darkest = side.min(axis=thickness)
-    dark = darkest < level
-    if int(dark.size) < 8:
-        return float(np.mean(dark)) > 0.45
+    dark = side < level
+    return any(_line_is_rule(dark[:, index]) for index in range(int(side.shape[1])))
+
+
+def _line_is_rule(line: np.ndarray[Any, Any]) -> bool:
+    if int(line.size) < 8:
+        return float(np.mean(line)) > 0.45
     # A printed rule is broken by specks. Bridge only a few pixels of gap.
-    closed = _close_gaps(dark, 3)
-    return float(np.mean(dark)) >= 0.20 and float(np.mean(closed)) >= 0.48
+    closed = _close_gaps(line, 3)
+    return float(np.mean(line)) >= 0.20 and float(np.mean(closed)) >= 0.48
 
 
 def _close_gaps(mask: np.ndarray[Any, Any], radius: int) -> np.ndarray[Any, Any]:
