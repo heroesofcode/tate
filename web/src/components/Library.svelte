@@ -356,11 +356,12 @@
   {/if}
 </div>
 
+<!-- No accept filter: mobile pickers grey out .tate files, which have no registered type.
+     Unsupported files are rejected after reading. -->
 <input
   bind:this={fileInput}
   class="file-input"
   type="file"
-  accept=".tate,.zip,.cbz,application/zip,application/x-cbz,application/vnd.tate+zip"
   multiple
   aria-label={t('importChapter')}
   onchange={onInput}
