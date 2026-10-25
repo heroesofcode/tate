@@ -152,7 +152,7 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
     zipped = Image.open(page_png(cache, "zipped-pdf"))
     assert zipped.size == pdf_size
     zipped.close()
-    assert (cache / "members" / "book" / "book.pdf").is_file()
+    assert len(list((cache / "members" / "book").glob("*.pdf"))) == 1
     assert not page_png(cache, "from-zip").exists()
 
     calls.clear()
