@@ -37,23 +37,42 @@ BACKGROUND_HEX = "#ffffff"
 
 @dataclass
 class SegmentDraft:
-    """One strip segment before gaps and encoding."""
+    """One strip segment before gaps and encoding.
+
+    ``box`` is the crop in source-page pixels, after text expansion and padding.
+    ``panel`` is the panel that crop came from, before expansion and padding.
+    ``continuation`` is true for every piece of a tall crop after the first.
+    """
 
     image: Image.Image
     page: int
     box: Box
     continuation: bool
+    panel: Box
 
 
 @dataclass
 class PageLayout:
-    """Segments for one page, plus the boxes drawn in a debug image."""
+    """Segments for one page, plus the boxes drawn in a debug image.
+
+    ``detected`` is the list drawn on a debug image. Panels in the order they
+    are emitted are ``emitted_panels``: continuation pieces collapse back onto
+    the panel they were cut from.
+    """
 
     segments: list[SegmentDraft]
     detected: list[Box]
     texts: list[Box]
     fallback: bool
     spread: bool
+
+    def emitted_panels(self) -> list[Box]:
+        """Panel boxes in emission order, with tall-panel pieces collapsed."""
+        panels: list[Box] = []
+        for segment in self.segments:
+            if not segment.continuation:
+                panels.append(segment.panel)
+        return panels
 
 
 def gap_sizes(width: int) -> tuple[int, int]:
@@ -169,8 +188,9 @@ def layout_page(
     spread = page_w > page_h * SPREAD_RATIO
     ordered = [cleaned[index] for index in reading_order(cleaned)]
     if spread or _cut_splash(image, cleaned) or _unreliable(cleaned, image):
+        whole = Box(0, 0, page_w, page_h)
         return PageLayout(
-            segments=_segments_for_box(image, Box(0, 0, page_w, page_h), page_index, width),
+            segments=_segments_for_box(image, whole, page_index, width, whole),
             detected=ordered,
             texts=texts,
             fallback=not spread,
@@ -184,14 +204,15 @@ def layout_page(
         box = pad_box(expanded[index], page_w, page_h)
         if box.w < 2 or box.h < 2:
             continue
-        pieces = _segments_for_box(image, box, page_index, width)
+        pieces = _segments_for_box(image, box, page_index, width, cleaned[index])
         if not pieces:
             continue
         used.append(box)
         segments.extend(pieces)
     if not segments:
+        whole = Box(0, 0, page_w, page_h)
         return PageLayout(
-            segments=_segments_for_box(image, Box(0, 0, page_w, page_h), page_index, width),
+            segments=_segments_for_box(image, whole, page_index, width, whole),
             detected=ordered,
             texts=texts,
             fallback=True,
@@ -275,18 +296,25 @@ def _unreliable(panels: Sequence[Box], image: Image.Image) -> bool:
     return ink_coverage(image, panels) < INK_COVERAGE_MIN
 
 
-def _segments_for_box(image: Image.Image, box: Box, page_index: int, width: int) -> list[SegmentDraft]:
+def _segments_for_box(
+    image: Image.Image,
+    box: Box,
+    page_index: int,
+    width: int,
+    panel: Box,
+) -> list[SegmentDraft]:
     clamped = box.clamp(image.width, image.height)
     if clamped.w < 1 or clamped.h < 1:
         return []
     crop = image.crop((clamped.x, clamped.y, clamped.x2, clamped.y2))
     rendered = _scale_to_strip(crop, width)
     if rendered.height <= MAX_SEGMENT_HEIGHT:
-        return [SegmentDraft(rendered, page_index, clamped, False)]
+        return [SegmentDraft(rendered, page_index, clamped, False, panel)]
     parts = _split_height(rendered, clamped)
     rendered.close()
     return [
-        SegmentDraft(part, page_index, part_box, index > 0) for index, (part, part_box) in enumerate(parts)
+        SegmentDraft(part, page_index, part_box, index > 0, panel)
+        for index, (part, part_box) in enumerate(parts)
     ]
 
 
