@@ -56,7 +56,7 @@ The output defaults to `<input stem>.tate` in the current directory. A short sum
 
 `auto` tries `yolo`, then falls back to `cv` if the model cannot be downloaded, and says so on stderr. `yolo` and `cv` do not fall back. `page` skips detection and emits each page as one segment (covers, splash pages, or when you want the page left whole).
 
-Panels are ordered right to left and top to bottom. `--direction ltr` mirrors that order: rows still run top to bottom, panels in a row run left to right, and a tall panel that blocks a horizontal cut is read as the left column first. A speech-balloon box that overlaps a panel is included in that panel's crop so the balloon is not sliced. After the panels are chosen, each crop grows until the crops together cover the page, so a margin, a caption, or a balloon that crosses a frame is still emitted. A block of strokes separated from every panel by a gutter (a missed panel, a title column) is emitted as its own segment. Strokes are pixels darker than the page's paper tone, so a tan scan is not treated as one field of ink. If detection looks wrong (too little of the ink covered, no real panel split, or heavy overlaps), the whole page is kept. Landscape spreads stay in one piece and are scaled to the strip width. A panel narrower than the strip is scaled up by at most 1.6× and centered on white. Segments taller than 4096 px are split.
+Panels are ordered right to left and top to bottom. `--direction ltr` mirrors that order: rows still run top to bottom, panels in a row run left to right, and a tall panel that blocks a horizontal cut is read as the left column first. Two or more side-by-side strips, each a stack of four or more panels, are read a strip at a time (right strip first, or the left strip first with `--direction ltr`). A speech-balloon box that overlaps a panel is included in that panel's crop so the balloon is not sliced. After the panels are chosen, each crop grows until the crops together cover the page, so a margin, a caption, or a balloon that crosses a frame is still emitted. A block of strokes separated from every panel by a gutter (a missed panel, a title column) is emitted as its own segment. A box that covers several panels is split on the paper gutters and frame rules between them. Strokes are pixels darker than the page's paper tone, so a tan scan is not treated as one field of ink. If detection looks wrong (too little of the ink covered, no real panel split, or heavy overlaps), the whole page is kept. A landscape spread — two facing pages meeting at a centre fold, or a wide page with no panel split — stays in one piece and is scaled to the strip width. A landscape page that is itself a grid of panels is laid out panel by panel. A panel narrower than the strip is scaled up by at most 1.6× and centered on white. Segments taller than 4096 px are split.
 
 ### yolo
 
@@ -66,7 +66,7 @@ Input is `1x3x1024x1024` float RGB in `0..1`, letterboxed with pad 114. Output `
 
 ### cv
 
-Classical OpenCV fallback. No model and no download. It looks for panel frames and large content regions separated by gutters, and merges tiny fragments. Text boxes are left empty; balloons are not specially protected in this mode.
+Classical OpenCV fallback. No model and no download. Ink is whatever is darker than the page's paper tone, so a tan or grey scan is not one solid blob. It looks for panel frames and large content regions separated by gutters, and merges tiny fragments. Text boxes are left empty; balloons are not specially protected in this mode.
 
 ### page
 

@@ -2,6 +2,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from tate.boxes import Box, Detection, clean_panels, drop_slivers, separate_overlaps
 from tate.debug import draw_debug
+from tate.gutters import split_on_gutters
 from tate.ink import cover_boxes
 from tate.layout import (
     MAX_SEGMENT_HEIGHT,
@@ -55,6 +56,24 @@ def test_one_panel_falls_back_to_the_whole_page() -> None:
         300,
         400,
     )
+
+
+def test_tan_paper_around_real_panels_is_not_a_fallback() -> None:
+    image = Image.new("RGB", (400, 640), (176, 164, 140))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((16, 16, 384, 290), outline=(10, 10, 10), width=6)
+    draw.rectangle((16, 330, 384, 610), outline=(10, 10, 10), width=6)
+    draw.line((40, 40, 300, 250), fill=(10, 10, 10), width=4)
+    draw.line((40, 360, 300, 560), fill=(10, 10, 10), width=4)
+    laid = layout_page(
+        image,
+        Detection((Box(16, 16, 368, 274), Box(16, 330, 368, 280)), ()),
+        page_index=0,
+        width=400,
+    )
+    assert laid.fallback is False
+    assert laid.spread is False
+    assert len(laid.segments) == 2
 
 
 def test_low_ink_coverage_falls_back_to_the_whole_page() -> None:
@@ -259,6 +278,50 @@ def test_same_page_panels_use_the_smaller_gap() -> None:
     assert len(segments) == 2
     gaps = assign_gaps(segments, 1080)
     assert gaps == [0, gap_sizes(1080)[0]]
+
+
+def test_landscape_page_of_panels_is_not_a_spread() -> None:
+    image = Image.new("RGB", (900, 600), "white")
+    draw = ImageDraw.Draw(image)
+    panels: list[Box] = []
+    for row in range(2):
+        for col in range(3):
+            x = 24 + col * 294
+            y = 24 + row * 286
+            draw.rectangle((x, y, x + 250, y + 250), fill=(30, 30, 30))
+            panels.append(Box(x, y, 250, 250))
+    laid = layout_page(image, Detection(tuple(panels), ()), page_index=0, width=400)
+    assert laid.spread is False
+    assert laid.fallback is False
+    assert len(laid.segments) == 6
+
+
+def test_a_merged_strip_is_split_along_the_gutters() -> None:
+    image = Image.new("RGB", (640, 920), "white")
+    draw = ImageDraw.Draw(image)
+    for row in range(2):
+        for col in range(3):
+            x = 20 + col * 206
+            y = 24 + row * 450
+            draw.rectangle((x, y, x + 176, y + 400), fill=(20, 20, 20))
+    laid = layout_page(
+        image,
+        Detection((Box(16, 16, 608, 880),), ()),
+        page_index=0,
+        width=400,
+    )
+    assert laid.spread is False
+    assert laid.fallback is False
+    assert len(laid.segments) == 6
+
+
+def test_a_stroke_through_a_drawing_is_not_a_gutter() -> None:
+    image = Image.new("RGB", (800, 800), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((180, 180, 620, 620), fill=(70, 70, 70))
+    draw.line((400, 180, 400, 620), fill=(0, 0, 0), width=6)
+    parts = split_on_gutters(image, [Box(180, 180, 440, 440)])
+    assert len(parts) == 1
 
 
 def test_crops_tile_the_page_so_margin_ink_is_kept() -> None:

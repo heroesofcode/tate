@@ -109,10 +109,16 @@ def test_strict_grid_is_right_to_left_then_top_to_bottom(
         for row in range(rows)
         for col in range(cols)
     ]
-    expected = [row * cols + col for row in range(rows) for col in range(cols - 1, -1, -1)]
+    strips = rows >= 4 and cols >= 2
+    if strips:
+        expected = [row * cols + col for col in range(cols - 1, -1, -1) for row in range(rows)]
+        expected_ltr = [row * cols + col for col in range(cols) for row in range(rows)]
+    else:
+        expected = [row * cols + col for row in range(rows) for col in range(cols - 1, -1, -1)]
+        expected_ltr = list(range(len(boxes)))
     assert reading_order(boxes) == expected
     assert reading_order(boxes, "rtl") == expected
-    assert reading_order(boxes, "ltr") == list(range(len(boxes)))
+    assert reading_order(boxes, "ltr") == expected_ltr
 
 
 @given(_any_boxes())
