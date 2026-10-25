@@ -71,10 +71,21 @@ def _assert_inside(box: Box, page_w: int, page_h: int, *, min_side: int) -> None
     assert box.x2 <= page_w and box.y2 <= page_h
 
 
+def _mirror_x(box: Box) -> Box:
+    return Box(-box.x2, box.y, box.w, box.h, box.score)
+
+
 @given(st.lists(_loose_box(), max_size=8))
 def test_reading_order_is_a_permutation(boxes: list[Box]) -> None:
     order = reading_order(boxes)
     assert sorted(order) == list(range(len(boxes)))
+    assert sorted(reading_order(boxes, "ltr")) == list(range(len(boxes)))
+
+
+@given(st.lists(_loose_box(), max_size=8))
+def test_ltr_order_matches_rtl_of_mirrored_boxes(boxes: list[Box]) -> None:
+    mirrored = [_mirror_x(box) for box in boxes]
+    assert reading_order(boxes, "ltr") == reading_order(mirrored, "rtl")
 
 
 @given(
@@ -100,6 +111,8 @@ def test_strict_grid_is_right_to_left_then_top_to_bottom(
     ]
     expected = [row * cols + col for row in range(rows) for col in range(cols - 1, -1, -1)]
     assert reading_order(boxes) == expected
+    assert reading_order(boxes, "rtl") == expected
+    assert reading_order(boxes, "ltr") == list(range(len(boxes)))
 
 
 @given(_any_boxes())
