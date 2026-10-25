@@ -33,9 +33,6 @@ def split_on_gutters(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     y_cuts = _cuts(dark, lum, paper, scale, page_h, axis=0)
     pieces: list[Box] = []
     for panel in panels:
-        if _is_whole_page(panel, page_w, page_h):
-            pieces.append(panel)
-            continue
         box = panel.clamp(page_w, page_h)
         if box.w < 2 or box.h < 2:
             continue
@@ -43,15 +40,6 @@ def split_on_gutters(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
             x_cuts = _cuts(dark, lum, paper, scale, page_w, axis=1, limit=band)
             pieces.extend(_apply(band, x_cuts, "x", page_w, page_h, dark, scale))
     return pieces
-
-
-def _is_whole_page(box: Box, page_w: int, page_h: int) -> bool:
-    """The page detector's box is the page itself, not a merged strip.
-
-    A detection that merely reaches the edges is still split: only the exact
-    page rectangle is left alone, so ``page`` mode stays one segment.
-    """
-    return box.x == 0 and box.y == 0 and box.w == page_w and box.h == page_h
 
 
 def _resize(rgb: np.ndarray[Any, Any]) -> tuple[np.ndarray[Any, Any], float]:

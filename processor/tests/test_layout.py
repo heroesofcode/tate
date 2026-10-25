@@ -2,6 +2,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from tate.boxes import Box, Detection, clean_panels, drop_slivers, separate_overlaps
 from tate.debug import draw_debug
+from tate.detect.page import PageDetector
 from tate.gutters import split_on_gutters
 from tate.ink import cover_boxes
 from tate.layout import (
@@ -294,6 +295,87 @@ def test_landscape_page_of_panels_is_not_a_spread() -> None:
     assert laid.spread is False
     assert laid.fallback is False
     assert len(laid.segments) == 6
+
+
+def _wide_strip() -> Image.Image:
+    """Landscape page. The gutters cut a page-sized box into six panels."""
+    image = Image.new("RGB", (1200, 920), "white")
+    draw = ImageDraw.Draw(image)
+    origin_x = (1200 - 640) // 2
+    for row in range(2):
+        for col in range(3):
+            x = origin_x + 20 + col * 206
+            y = 24 + row * 450
+            draw.rectangle((x, y, x + 176, y + 400), fill=(20, 20, 20))
+    return image
+
+
+def _spread_with_title() -> tuple[Image.Image, Box, Box, Box]:
+    image = Image.new("RGB", (1600, 1000), "white")
+    draw = ImageDraw.Draw(image)
+    left = Box(40, 180, 700, 780)
+    right = Box(860, 180, 700, 780)
+    title = Box(500, 30, 600, 110)
+    draw.rectangle((left.x, left.y, left.x2, left.y2), fill=(30, 30, 30))
+    draw.rectangle((right.x, right.y, right.x2, right.y2), fill=(30, 30, 30))
+    draw.rectangle((title.x, title.y, title.x2, title.y2), fill=(10, 10, 10))
+    return image, left, right, title
+
+
+def test_a_full_page_box_is_split_along_the_gutters() -> None:
+    image = _wide_strip()
+    page_w, page_h = image.size
+    boxes = (
+        Box(0, 0, page_w, page_h),
+        Box(-8, -6, page_w + 16, page_h + 12),
+    )
+    try:
+        for box in boxes:
+            laid = layout_page(image, Detection((box,), ()), page_index=0, width=400)
+            assert laid.spread is False
+            assert laid.fallback is False
+            assert len(laid.segments) == 6
+    finally:
+        image.close()
+
+
+def test_page_mode_keeps_a_guttered_page_whole() -> None:
+    image = _wide_strip()
+    try:
+        detection = PageDetector().detect(image)
+        assert detection.panels == ()
+        laid = layout_page(image, detection, page_index=0, width=400)
+        assert laid.spread is True
+        assert laid.fallback is False
+        assert len(laid.segments) == 1
+        segment = laid.segments[0]
+        assert (segment.box.x, segment.box.y, segment.box.w, segment.box.h) == (0, 0, *image.size)
+    finally:
+        image.close()
+
+
+def test_recovered_title_on_a_spread_stays_one_piece() -> None:
+    image, left, right, _title = _spread_with_title()
+    try:
+        laid = layout_page(image, Detection((left, right), ()), page_index=0, width=800)
+        assert laid.spread is True
+        assert laid.fallback is False
+        assert len(laid.segments) == 1
+        segment = laid.segments[0]
+        assert (segment.box.x, segment.box.y, segment.box.w, segment.box.h) == (0, 0, 1600, 1000)
+    finally:
+        image.close()
+
+
+def test_a_detected_title_is_not_part_of_the_spread() -> None:
+    image, left, right, title = _spread_with_title()
+    try:
+        laid = layout_page(image, Detection((left, right, title), ()), page_index=0, width=800)
+        assert laid.spread is False
+        assert laid.fallback is False
+        assert len(laid.segments) == 3
+    finally:
+        image.close()
 
 
 def test_a_merged_strip_is_split_along_the_gutters() -> None:

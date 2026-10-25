@@ -188,11 +188,14 @@ def layout_page(
     """Lay one page out. Spreads and unreliable detections stay as a single segment.
 
     ``direction`` is the reading order of the panels. ``rtl`` is the default.
+    A spread is judged on the panels found before uncovered ink is recovered.
+    A title or a bleed brought back afterwards stays inside the spread.
     """
     page_w, page_h = image.size
-    cleaned = _prepare_panels(image, detection.panels)
     texts = prepare_texts(detection.texts, page_w, page_h)
-    spread = _is_spread(page_w, page_h, cleaned)
+    base = _panels_before_recovery(image, detection.panels)
+    spread = _is_spread(page_w, page_h, base)
+    cleaned = base if spread else _recover_panels(image, base)
     ordered = [cleaned[index] for index in reading_order(cleaned, direction)]
     if spread or _cut_splash(image, cleaned) or _unreliable(cleaned, image):
         whole = Box(0, 0, page_w, page_h)
@@ -232,18 +235,24 @@ def layout_page(
     return PageLayout(segments=segments, detected=used, texts=texts, fallback=False, spread=False)
 
 
-def _prepare_panels(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
+def _panels_before_recovery(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     page_w, page_h = image.size
     cleaned = clean_panels(panels, page_w, page_h)
     cleaned = drop_slivers(cleaned, page_w, page_h)
     cleaned = split_on_gutters(image, cleaned)
     cleaned = clean_panels(cleaned, page_w, page_h)
     cleaned = drop_slivers(cleaned, page_w, page_h)
-    recovered = recover_uncovered(image, cleaned)
-    if recovered:
-        # A recovered column is a missed region, not a thin edge of a panel
-        # already found, so sliver cleanup does not see it.
-        cleaned = clean_panels([*cleaned, *recovered], page_w, page_h)
+    return separate_overlaps(cleaned)
+
+
+def _recover_panels(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
+    page_w, page_h = image.size
+    recovered = recover_uncovered(image, panels)
+    if not recovered:
+        return list(panels)
+    # A recovered column is a missed region, not a thin edge of a panel
+    # already found, so sliver cleanup does not see it.
+    cleaned = clean_panels([*panels, *recovered], page_w, page_h)
     return separate_overlaps(cleaned)
 
 
