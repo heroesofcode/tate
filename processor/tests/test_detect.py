@@ -6,13 +6,13 @@ from typing import Any
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
-from tests.pages import grid_page
 
 from tate.boxes import contained_ratio
 from tate.detect.cv import CvDetector
 from tate.detect.model import MODEL_SHA256, MODEL_URL, write_verified
 from tate.detect.yolo import PANEL_CONF, YoloDetector
 from tate.errors import TateError
+from tests.pages import grid_page
 
 
 def test_model_pin_is_the_published_export() -> None:

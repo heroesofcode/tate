@@ -1,9 +1,9 @@
 from pathlib import Path
 
 import pytest
-from tests.pages import grid_page, save_jpeg
 
 from tate.cli import main
+from tests.pages import grid_page, save_jpeg
 
 
 def test_missing_input_exits_nonzero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
