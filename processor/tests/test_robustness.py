@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import struct
-import subprocess
 import zipfile
 import zlib
 from pathlib import Path
@@ -231,24 +230,8 @@ def test_pdf_pages_of_different_sizes_and_orientations(tmp_path: Path, epoch: No
 
 
 def test_encrypted_and_corrupt_pdfs_fail(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    plain = tmp_path / "plain.pdf"
-    _write_varied_pdf(plain)
-    encrypted = tmp_path / "secret.pdf"
-    subprocess.run(
-        [
-            "gs",
-            "-q",
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.4",
-            "-sOwnerPassword=secret",
-            "-sUserPassword=secret",
-            "-o",
-            str(encrypted),
-            str(plain),
-        ],
-        check=True,
-        capture_output=True,
-    )
+    # One blank page with the user password "secret", made with Ghostscript pdfwrite.
+    encrypted = Path(__file__).parent / "data" / "encrypted.pdf"
     corrupt = tmp_path / "broken.pdf"
     corrupt.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nstream\nnot a page\nendstream\n%%EOF")
     for path in (encrypted, corrupt):
