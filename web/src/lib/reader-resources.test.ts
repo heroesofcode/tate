@@ -52,7 +52,7 @@ describe('segment object urls', () => {
   it('revokes urls already shown when the reader closes', async () => {
     const { slots, revoked } = urlSlots();
     const pending = deferred<Blob | undefined>();
-    const claim = slots.claim(1, 1, () => pending.promise);
+    const claim = slots.claim(1, () => pending.promise);
     pending.resolve(new Blob(['panel']));
     expect(await claim).toBe('blob:1');
     slots.close();
@@ -63,7 +63,7 @@ describe('segment object urls', () => {
   it('does not retain an object url finished after the reader closes', async () => {
     const { slots, created, revoked } = urlSlots();
     const pending = deferred<Blob | undefined>();
-    const claim = slots.claim(1, 1, () => pending.promise);
+    const claim = slots.claim(1, () => pending.promise);
     slots.close();
     pending.resolve(new Blob(['panel']));
     expect(await claim).toBeNull();
@@ -83,24 +83,48 @@ describe('segment object urls', () => {
         revoked.push(url);
       },
     });
-    expect(await slots.claim(0, 1, async () => new Blob(['panel']))).toBeNull();
+    expect(await slots.claim(0, async () => new Blob(['panel']))).toBeNull();
     expect(slots.has(0)).toBe(false);
     expect(revoked).toEqual(['blob:late']);
   });
 
-  it('drops a load superseded by a newer generation', async () => {
-    const { slots, created, revoked } = urlSlots();
+  it('keeps a load that is still wanted instead of restarting it', async () => {
+    const { slots, created } = urlSlots();
     const first = deferred<Blob | undefined>();
-    const second = deferred<Blob | undefined>();
-    const older = slots.claim(0, 1, () => first.promise);
-    const newer = slots.claim(0, 2, () => second.promise);
-    first.resolve(new Blob(['old']));
-    expect(await older).toBeNull();
-    second.resolve(new Blob(['new']));
-    expect(await newer).toBe('blob:1');
+    let loads = 0;
+    const load = () => {
+      loads += 1;
+      return first.promise;
+    };
+    const claim = slots.claim(0, load);
+    expect(slots.pending(0)).toBe(true);
+    expect(await slots.claim(0, load)).toBeNull();
+    expect(loads).toBe(1);
+    first.resolve(new Blob(['panel']));
+    expect(await claim).toBe('blob:1');
     expect(created).toEqual(['blob:1']);
-    expect(revoked).toEqual([]);
+    expect(slots.pending(0)).toBe(false);
     expect(slots.has(0)).toBe(true);
+  });
+
+  it('cancels a load when its index leaves the window', async () => {
+    const { slots, created } = urlSlots();
+    const pending = deferred<Blob | undefined>();
+    const claim = slots.claim(2, () => pending.promise);
+    expect(slots.indices()).toEqual([2]);
+    slots.revoke(2);
+    expect(slots.pending(2)).toBe(false);
+    pending.resolve(new Blob(['panel']));
+    expect(await claim).toBeNull();
+    expect(created).toEqual([]);
+    expect(slots.has(2)).toBe(false);
+  });
+
+  it('allows a retry after a load finds nothing', async () => {
+    const { slots } = urlSlots();
+    expect(await slots.claim(3, async () => undefined)).toBeNull();
+    expect(slots.pending(3)).toBe(false);
+    expect(await slots.claim(3, async () => new Blob(['panel']))).toBe('blob:1');
   });
 });
 

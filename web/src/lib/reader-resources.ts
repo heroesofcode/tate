@@ -55,10 +55,12 @@ export function createUrlSlots(urls?: {
   const create = urls?.create ?? ((blob: Blob) => URL.createObjectURL(blob));
   const revoke = urls?.revoke ?? ((url: string) => URL.revokeObjectURL(url));
   let closed = false;
+  let ticket = 0;
   const live = new Map<number, string>();
   const inflight = new Map<number, number>();
 
   function revokeIndex(index: number): boolean {
+    inflight.delete(index);
     const url = live.get(index);
     if (!url) return false;
     live.delete(index);
@@ -70,25 +72,47 @@ export function createUrlSlots(urls?: {
     has(index: number) {
       return live.has(index);
     },
-    indices() {
-      return [...live.keys()];
+    /** True while a load for this index is still running. */
+    pending(index: number) {
+      return inflight.has(index);
     },
+    /** Every index that is shown or still loading. */
+    indices() {
+      return [...new Set([...live.keys(), ...inflight.keys()])];
+    },
+    /** Drops the shown url and cancels any load still running for the index. */
     revoke: revokeIndex,
     close() {
       closed = true;
       inflight.clear();
       for (const index of [...live.keys()]) revokeIndex(index);
     },
-    async claim(index: number, generation: number, load: () => Promise<Blob | undefined>) {
-      if (closed || live.has(index)) return null;
-      inflight.set(index, generation);
-      const blob = await load();
-      if (closed || inflight.get(index) !== generation || !blob) return null;
+    /**
+     * Loads a segment unless it is already shown or loading. A load is only
+     * dropped when the index is revoked or the slots close, so scrolling does
+     * not restart work that is still wanted.
+     */
+    async claim(index: number, load: () => Promise<Blob | undefined>) {
+      if (closed || live.has(index) || inflight.has(index)) return null;
+      const mine = ++ticket;
+      inflight.set(index, mine);
+      let blob: Blob | undefined;
+      try {
+        blob = await load();
+      } catch {
+        blob = undefined;
+      }
+      if (closed || inflight.get(index) !== mine) return null;
+      if (!blob) {
+        inflight.delete(index);
+        return null;
+      }
       const url = create(blob);
-      if (closed || inflight.get(index) !== generation) {
+      if (closed || inflight.get(index) !== mine) {
         revoke(url);
         return null;
       }
+      inflight.delete(index);
       live.set(index, url);
       return url;
     },

@@ -26,7 +26,6 @@
   let restored = false;
   const loaded = createUrlSlots();
   const screenWake = createScreenWake(() => navigator.wakeLock.request('screen'));
-  let generation = 0;
 
   const light = $derived(chapter ? isLightBackground(chapter.background) : false);
   const percent = $derived(
@@ -70,10 +69,10 @@
     setUrl(index, null);
   }
 
-  async function activate(index: number, gen: number) {
+  async function activate(index: number) {
     if (!chapter) return;
     const id = chapter.id;
-    const url = await loaded.claim(index, gen, () => getSegmentBlob(id, index));
+    const url = await loaded.claim(index, () => getSegmentBlob(id, index));
     if (url) setUrl(index, url);
   }
 
@@ -100,13 +99,12 @@
   function syncWindow() {
     const root = scroller;
     if (!root) return;
-    const gen = ++generation;
     const want = new Set(desired(root));
     for (const index of loaded.indices()) {
       if (!want.has(index)) revoke(index);
     }
     for (const index of want) {
-      if (!loaded.has(index)) void activate(index, gen);
+      if (!loaded.has(index) && !loaded.pending(index)) void activate(index);
     }
   }
 
