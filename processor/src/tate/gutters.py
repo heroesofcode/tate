@@ -1,13 +1,14 @@
 """Split a box that covers several panels along the gutters between them.
 
-A gutter is a band of paper with drawings on both sides, or a thin dark rule
+A gutter is a band of paper with drawings on both sides, a bright strip of this
+page's own sheet when that colour is not the border sample, or a thin dark rule
 whose shoulders are paper. The line has to cross the whole box, edge to edge
 apart from a short tolerance, so a rule through one column does not slice the
 panel beside it. A stroke that stops inside the drawing, a hairline white gap,
-and a cut that would leave a thin sliver are not gutters. Cuts are searched
-inside one row at a time, because a vertical rule usually stops at the
-horizontal gutter. Nothing here is tuned to a particular page: a cut is kept
-only when both pieces are large and inky.
+a grey strip between strokes, and a cut that would leave a thin sliver are not
+gutters. Cuts are searched inside one row at a time, because a vertical rule
+usually stops at the horizontal gutter. Nothing here is tuned to a particular
+page: a cut is kept only when both pieces are large and inky.
 """
 
 from __future__ import annotations
@@ -95,8 +96,8 @@ def full_span_divider(
     """True when a frame rule or a paper gap at ``cut`` crosses all of ``box``.
 
     ``axis`` ``"x"`` is a vertical line. ``"y"`` is a horizontal line. The line
-    may stop a little short of the box edge. A paper gap, or a thin dark rule
-    with paper on both sides, counts.
+    may stop a little short of the box edge. A paper gap, a bright sheet that is
+    not the border sample, or a thin dark rule with paper on both sides, counts.
     ``allow_ink_rule`` also accepts a thin dark band that reaches both edges,
     which is how a coloured panel is framed when the paint goes up to the rule.
     """
@@ -588,6 +589,8 @@ def _divider_view(
     run = _longest_run([bool(flag) for flag in spanning])
     if run is not None and run[1] - run[0] >= 2 and _ink_both_sides(sheet, start + run[0], start + run[1]):
         return True
+    if _light_gap_view(lum, start, end, page_light):
+        return True
     if _frame_rule_view(sheet, lum, start, end):
         return True
     return allow_ink_rule and _ink_rule_view(lum, start, end)
@@ -639,6 +642,56 @@ def _ink_both_sides(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -
             if column < 0 or column >= along:
                 return False
             if float((~sheet[:, column]).mean()) >= 0.10:
+                return True
+        return False
+
+    return inky(run_start - 1, -1) and inky(run_end, 1)
+
+
+def _light_gap_view(lum: np.ndarray[Any, Any], start: int, end: int, page_light: float) -> bool:
+    """A bright band of the sheet across the whole span, with drawing on both sides.
+
+    The band has to be as light as the page's sheet, so a grey strip between two
+    strokes is not a gutter. It still counts when that light colour is not the
+    border sample. A light panel fills the search window and is not a gutter;
+    the band has to be a strip with an edge on both sides. The strip stays
+    narrow: a wide light field is the panel, not the gutter, and treating it as
+    one makes a classical page fall back to a single crop.
+    """
+    if end - start < 5:
+        return False
+    thresh = page_light - 12.0
+    flags = _span_columns(lum[:, start:end] > thresh, 0.90)
+    index = 0
+    while index < len(flags):
+        if not bool(flags[index]):
+            index += 1
+            continue
+        end_run = index
+        while end_run < len(flags) and bool(flags[end_run]):
+            end_run += 1
+        width = end_run - index
+        bounded = index > 0 and end_run < len(flags)
+        if (
+            2 <= width <= 48
+            and bounded
+            and _dark_both_sides(lum, start + index, start + end_run, thresh - 28.0)
+        ):
+            return True
+        index = end_run
+    return False
+
+
+def _dark_both_sides(lum: np.ndarray[Any, Any], run_start: int, run_end: int, level: float) -> bool:
+    """Drawing, not more blank paper, sits within a short walk of both sides."""
+    along = int(lum.shape[1])
+
+    def inky(origin: int, direction: int) -> bool:
+        for delta in range(1, 57):
+            column = origin + direction * delta
+            if column < 0 or column >= along:
+                return False
+            if float((lum[:, column] < level).mean()) >= 0.10:
                 return True
         return False
 
@@ -802,7 +855,8 @@ def _apply(
     inset = max(round(span * 0.14), round(page_span * 0.05))
     # The candidate was measured on a wider view. Keep it only when the same
     # kind of gutter runs across this box, so a column rule cannot cut its neighbour.
-    # A full-resolution sheet gap or rule counts too, when the resized view missed it.
+    # A full-resolution sheet gap or rule counts too, including a light band of
+    # the page's own sheet that the resized valley test missed.
     interior = [
         cut
         for cut in cuts

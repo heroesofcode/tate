@@ -520,6 +520,29 @@ def test_a_tall_side_panel_is_not_split_by_the_neighbouring_column_rule() -> Non
     assert tall_parts[0].y2 >= 850
 
 
+def test_a_bright_gap_counts_when_it_is_not_the_border_colour() -> None:
+    image = Image.new("RGB", (1000, 800), (190, 140, 90))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((50, 50, 950, 750), fill=(250, 250, 245))
+    draw.rectangle((80, 80, 460, 700), fill=(30, 40, 70))
+    draw.rectangle((520, 80, 920, 700), fill=(70, 30, 40))
+    parts = split_on_gutters(image, [Box(80, 80, 840, 620)])
+    assert len(parts) == 2
+    assert parts[0].x2 <= parts[1].x or parts[1].x2 <= parts[0].x
+    image.close()
+
+
+def test_a_grey_strip_between_strokes_is_not_a_gutter() -> None:
+    image = Image.new("RGB", (900, 700), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 40, 860, 660), fill=(200, 200, 200))
+    draw.rectangle((80, 80, 400, 600), fill=(10, 10, 10))
+    draw.rectangle((480, 80, 820, 600), fill=(10, 10, 10))
+    parts = split_on_gutters(image, [Box(80, 80, 740, 520)])
+    assert len(parts) == 1
+    image.close()
+
+
 def test_a_line_that_stops_short_of_the_panel_is_not_a_gutter() -> None:
     image = Image.new("RGB", (800, 520), "white")
     draw = ImageDraw.Draw(image)
