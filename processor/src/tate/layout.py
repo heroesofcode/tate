@@ -21,7 +21,7 @@ from tate.boxes import (
     union_box,
 )
 from tate.detect.cv import recover_uncovered
-from tate.order import reading_order
+from tate.order import ReadingDirection, reading_order
 
 MAX_UPSCALE = 1.6
 MAX_SEGMENT_HEIGHT = 4096
@@ -180,13 +180,17 @@ def layout_page(
     *,
     page_index: int,
     width: int,
+    direction: ReadingDirection = "rtl",
 ) -> PageLayout:
-    """Lay one page out. Spreads and unreliable detections stay as a single segment."""
+    """Lay one page out. Spreads and unreliable detections stay as a single segment.
+
+    ``direction`` is the reading order of the panels. ``rtl`` is the default.
+    """
     page_w, page_h = image.size
     cleaned = _prepare_panels(image, detection.panels)
     texts = prepare_texts(detection.texts, page_w, page_h)
     spread = page_w > page_h * SPREAD_RATIO
-    ordered = [cleaned[index] for index in reading_order(cleaned)]
+    ordered = [cleaned[index] for index in reading_order(cleaned, direction)]
     if spread or _cut_splash(image, cleaned) or _unreliable(cleaned, image):
         whole = Box(0, 0, page_w, page_h)
         return PageLayout(
@@ -197,7 +201,7 @@ def layout_page(
             spread=spread,
         )
     expanded = expand_for_text(cleaned, texts, page_w, page_h)
-    order = reading_order(cleaned)
+    order = reading_order(cleaned, direction)
     segments: list[SegmentDraft] = []
     used: list[Box] = []
     for index in order:

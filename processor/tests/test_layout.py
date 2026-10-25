@@ -1,6 +1,7 @@
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from tate.boxes import Box, Detection, clean_panels, drop_slivers, separate_overlaps
+from tate.debug import draw_debug
 from tate.layout import (
     MAX_SEGMENT_HEIGHT,
     assign_gaps,
@@ -159,6 +160,61 @@ def test_gaps_are_larger_between_pages() -> None:
     second = layout_page(Image.new("RGB", (80, 80), "white"), Detection((), ()), page_index=1, width=1080)
     gaps = assign_gaps([*first.segments, *second.segments], 1080)
     assert gaps == [0, page]
+
+
+def _glyph_pixels(digit: str, font_size: int) -> set[tuple[int, int]]:
+    font = ImageFont.load_default(size=font_size)
+    canvas = Image.new("RGB", (font_size * 2, font_size * 2), (255, 255, 255))
+    ImageDraw.Draw(canvas).text(
+        (0, 0),
+        digit,
+        fill=(40, 160, 70),
+        font=font,
+        stroke_width=2,
+        stroke_fill=(255, 255, 255),
+    )
+    found: set[tuple[int, int]] = set()
+    for y in range(canvas.height):
+        for x in range(canvas.width):
+            if canvas.getpixel((x, y)) == (40, 160, 70):
+                found.add((x, y))
+    canvas.close()
+    return found
+
+
+def _shows_digit(overlay: Image.Image, box: Box, digit: str) -> bool:
+    line = max(4, min(overlay.size) // 350)
+    font_size = max(28, min(overlay.size) // 32)
+    glyph = _glyph_pixels(digit, font_size)
+    assert glyph
+    origin_x = box.x + line
+    origin_y = box.y + line
+    for x, y in glyph:
+        px = origin_x + x
+        py = origin_y + y
+        if px < 0 or py < 0 or px >= overlay.width or py >= overlay.height:
+            return False
+        if overlay.getpixel((px, py)) != (40, 160, 70):
+            return False
+    return True
+
+
+def test_direction_orders_panels_and_debug_numbers() -> None:
+    image = Image.new("RGB", (420, 560), "white")
+    panels = (Box(16, 20, 174, 240), Box(220, 20, 180, 240))
+    detection = Detection(panels, ())
+    rtl = layout_page(image, detection, page_index=0, width=200)
+    explicit = layout_page(image, detection, page_index=0, width=200, direction="rtl")
+    ltr = layout_page(image, detection, page_index=0, width=200, direction="ltr")
+    assert [segment.panel.x for segment in rtl.segments] == [segment.panel.x for segment in explicit.segments]
+    assert [segment.panel.x for segment in rtl.segments] == [220, 16]
+    assert [segment.panel.x for segment in ltr.segments] == [16, 220]
+    assert [box.x for box in ltr.detected] == [box.x for box in (segment.box for segment in ltr.segments)]
+    overlay = draw_debug(image, ltr)
+    assert _shows_digit(overlay, ltr.detected[0], "1")
+    assert _shows_digit(overlay, ltr.detected[1], "2")
+    overlay.close()
+    image.close()
 
 
 def test_same_page_panels_use_the_smaller_gap() -> None:
