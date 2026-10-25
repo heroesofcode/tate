@@ -236,7 +236,9 @@ def _prepare_panels(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     cleaned = drop_slivers(cleaned, page_w, page_h)
     recovered = recover_uncovered(image, cleaned)
     if recovered:
-        cleaned = drop_slivers(clean_panels([*cleaned, *recovered], page_w, page_h), page_w, page_h)
+        # A recovered column is a missed region, not a thin edge of a panel
+        # already found, so sliver cleanup does not see it.
+        cleaned = clean_panels([*cleaned, *recovered], page_w, page_h)
     return separate_overlaps(cleaned)
 
 

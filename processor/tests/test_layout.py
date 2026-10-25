@@ -121,6 +121,36 @@ def test_stacked_overlap_is_split_instead_of_repeated() -> None:
     assert separated[0].h + separated[1].h == 220
 
 
+def test_title_column_across_a_gutter_is_its_own_segment() -> None:
+    image = Image.new("RGB", (800, 1100), "white")
+    draw = ImageDraw.Draw(image)
+    panel = Box(40, 80, 340, 860)
+    # Wide enough to stay a column, close enough that growing across the
+    # blank paper would meet the panel and hide the gutter.
+    column = Box(panel.x2 + 26, 120, 70, 700)
+    draw.rectangle((panel.x, panel.y, panel.x2, panel.y2), fill=(30, 30, 30))
+    draw.rectangle((column.x, column.y, column.x2, column.y2), fill=(20, 20, 20))
+    laid = layout_page(image, Detection((panel,), ()), page_index=0, width=1080)
+    assert laid.fallback is False
+    assert len(laid.segments) == 2
+    assert any(segment.panel.x >= panel.x2 and segment.panel.x2 >= column.x2 - 4 for segment in laid.segments)
+    image.close()
+
+
+def test_narrow_recovered_column_survives_sliver_cleanup() -> None:
+    image = Image.new("RGB", (800, 1100), "white")
+    draw = ImageDraw.Draw(image)
+    column = Box(772, 100, 28, 760)
+    panel = Box(30, 80, column.x - 36 - 30, 780)
+    draw.rectangle((panel.x, panel.y, panel.x2, panel.y2), fill=(30, 30, 30))
+    draw.rectangle((column.x, column.y, column.x2, column.y2), fill=(20, 20, 20))
+    laid = layout_page(image, Detection((panel,), ()), page_index=0, width=1080)
+    assert laid.fallback is False
+    assert len(laid.segments) == 2
+    assert any(segment.panel.x > panel.x2 and segment.panel.w < 80 for segment in laid.segments)
+    image.close()
+
+
 def test_a_missed_panel_is_recovered_from_uncovered_ink() -> None:
     image = Image.new("RGB", (800, 1000), "white")
     draw = ImageDraw.Draw(image)
