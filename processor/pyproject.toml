@@ -1,0 +1,59 @@
+[project]
+name = "tate"
+version = "0.1.0"
+description = "Turn a manga chapter into a vertical webtoon-style strip"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "numpy",
+    "onnxruntime",
+    "opencv-python-headless",
+    "pillow",
+    "platformdirs",
+    "pypdfium2",
+]
+
+[project.scripts]
+tate = "tate.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15",
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "C4"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "network: downloads the YOLO detector weights (set TATE_NETWORK_TESTS=1)",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+mypy_path = "src"
+packages = ["tate"]
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "onnxruntime", "onnxruntime.*", "pypdfium2", "pypdfium2.*"]
+ignore_missing_imports = true
