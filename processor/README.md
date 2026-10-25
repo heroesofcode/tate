@@ -66,7 +66,7 @@ Input is `1x3x1024x1024` float RGB in `0..1`, letterboxed with pad 114. Output `
 
 ### cv
 
-Classical OpenCV fallback. No model and no download. Ink is whatever is darker than the page's paper tone, so a tan or grey scan is not one solid blob. It looks for panel frames and large content regions separated by gutters, and merges tiny fragments. Text boxes are left empty; balloons are not specially protected in this mode.
+Classical OpenCV fallback. No model and no download. Gutters are regions the colour of the page background, so a white sheet, yellowed paper, and a dark margin all separate panels. Long dark rules enclose rectangles, including a panel that bleeds off the scan, and a small caption box sharing an edge is folded back into its panel. Text boxes are left empty; balloons are not specially protected in this mode.
 
 ### page
 

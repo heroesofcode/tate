@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from tate.boxes import Box, Detection, box_distance, union_box
+from tate.detect.frames import background_color, frame_panels, fuse_panels
 from tate.ink import recover_regions
 
 
@@ -19,20 +20,23 @@ class CvDetector:
         return "cv"
 
     def detect(self, image: Image.Image) -> Detection:
-        return Detection(tuple(_panels(image)), ())
+        gutters = gutter_panels(image)
+        frames = frame_panels(image)
+        fused = fuse_panels(gutters, frames, image.width, image.height)
+        return Detection(tuple(fused), ())
+
+
+def gutter_panels(image: Image.Image) -> list[Box]:
+    """Content regions separated by a gutter the colour of this page's background."""
+    return _panels(image)
 
 
 def _panels(image: Image.Image) -> list[Box]:
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
-    gray = cast(np.ndarray[Any, Any], cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY))
-    height, width = int(gray.shape[0]), int(gray.shape[1])
+    height, width = int(rgb.shape[0]), int(rgb.shape[1])
     if height < 2 or width < 2:
         return []
-    paper = float(np.percentile(gray, 72))
-    level = min(40.0, max(1.0, paper - 20.0)) if paper < 110 else max(1.0, paper - 26.0)
-    _bin, white_any = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY)
-    white = cast(np.ndarray[Any, Any], white_any)
-    content = cast(np.ndarray[Any, Any], cv2.bitwise_not(white))
+    content = _content_mask(rgb)
     gap = max(3, round(min(height, width) * 0.01))
     if gap % 2 == 0:
         gap += 1
@@ -49,8 +53,24 @@ def _panels(image: Image.Image) -> list[Box]:
             continue
         if bw < width * 0.05 or bh < height * 0.025:
             continue
-        boxes.append(Box(x, y, bw, bh))
+        boxes.append(Box(x, y, bw, bh, 0.5))
     return _merge_fragments(boxes, width, height)
+
+
+def _content_mask(rgb: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """Ink and paint, measured against the page background rather than pure white.
+
+    A dark margin (a black webtoon gutter) is the background, so the art is
+    whatever sits away from that colour. Yellowed paper works the same way:
+    the gutter matches the sheet, and the panel does not.
+    """
+    background = background_color(rgb)
+    diff = rgb.astype(np.float32) - background
+    distance = np.sqrt(np.square(diff).sum(axis=2))
+    luminance = float(0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2])
+    tau = 22.0 if luminance < 85.0 else 16.0
+    mask = (distance > tau).astype(np.uint8) * 255
+    return cast(np.ndarray[Any, Any], mask)
 
 
 def _merge_fragments(boxes: list[Box], page_w: int, page_h: int) -> list[Box]:
