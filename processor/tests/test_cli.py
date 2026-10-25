@@ -55,3 +55,16 @@ def test_help() -> None:
     with pytest.raises(SystemExit) as caught:
         main(["--help"])
     assert caught.value.code == 0
+
+
+def test_current_directory_input_uses_the_folder_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tate.pipeline import default_output, default_title, input_name
+
+    folder = tmp_path / "chapter-one"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    assert input_name(Path(".")) == "chapter-one"
+    assert default_title(Path(".")) == "chapter-one"
+    assert default_output(Path(".")).name == "chapter-one.tate"

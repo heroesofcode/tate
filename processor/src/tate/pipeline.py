@@ -37,15 +37,24 @@ class ProcessResult:
     elapsed: float
 
 
+def input_name(path: Path) -> str:
+    """File name of the input; a directory such as ``.`` resolves to its real name."""
+    name = path.name or path.resolve().name
+    return name or "chapter"
+
+
+def input_stem(path: Path) -> str:
+    if path.is_dir():
+        return input_name(path)
+    return path.stem or "chapter"
+
+
 def default_output(path: Path) -> Path:
-    stem = path.name if path.is_dir() else path.stem
-    return Path.cwd() / f"{stem}.tate"
+    return Path.cwd() / f"{input_stem(path)}.tate"
 
 
 def default_title(path: Path) -> str:
-    if path.is_dir():
-        return path.name
-    return path.stem
+    return input_stem(path)
 
 
 def format_bytes(size: int) -> str:
@@ -140,7 +149,7 @@ def process_chapter(
 
     manifest = build_manifest(
         title=title if title is not None else default_title(input_path),
-        source=input_path.name,
+        source=input_name(input_path),
         width=width,
         detector=chosen.name,
         page_count=page_count,
