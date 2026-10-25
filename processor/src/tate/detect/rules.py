@@ -4,8 +4,9 @@ The paper colour is the morphological closing of the page, so a tan or
 uneven sheet is measured per region rather than as one global white.
 A clean grid replaces the detector only when the cells agree with it
 and either explain a merged sheet, a set of equal floating panels, or
-a majority of cells the detector missed. One interior cell can be added
-when the rest of that grid already matches.
+a majority of cells the detector missed. A panel beside a floating
+grid is kept. One interior cell can be added when the rest of that
+grid already matches.
 """
 
 from __future__ import annotations
@@ -99,17 +100,19 @@ def adopt_ruled_grid(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
 
     A full sheet the detector merged, equal floating panels it split into
     extras, or a grid it mostly missed, is replaced by the cells. Boxes that
-    already sit on those cells are snapped onto the rules. A single interior
-    cell the detector skipped is added. Anything else stays.
+    already sit on those cells are snapped onto the rules. A panel beside a
+    floating grid is kept. A single interior cell the detector skipped is
+    added. Anything else stays.
     """
     cells, fills = ruled_cells(image)
     page_w, page_h = image.size
-    if not _grid_ok(panels, cells, fills, page_w, page_h):
+    adopted = _grid_ok(panels, cells, fills, page_w, page_h)
+    if adopted is None:
         added = _interior_cell(panels, cells, fills, page_w, page_h)
         if added is None:
             return [box.clamp(page_w, page_h) for box in panels]
         return [*panels, added]
-    return cells
+    return [box.clamp(page_w, page_h) for box in adopted]
 
 
 def _rule_gray(rgb: np.ndarray[Any, Any]) -> tuple[np.ndarray[Any, Any], float]:
@@ -201,11 +204,16 @@ def _grid_ok(
     fills: Sequence[float],
     page_w: int,
     page_h: int,
-) -> bool:
+) -> list[Box] | None:
+    """Cells to adopt, or None when the detector's boxes stand.
+
+    On a floating grid the cells replace detections that sit on them or
+    inside the grid. A panel or a title outside that grid stays.
+    """
     if len(cells) < _MIN_CELLS or not fills or float(np.median(fills)) < _MEDIAN_FILL:
-        return False
+        return None
     if not _disjoint(cells):
-        return False
+        return None
     areas = [cell.area for cell in cells]
     ratio = min(areas) / max(areas)
     cover = sum(areas) / (page_w * page_h)
@@ -214,24 +222,25 @@ def _grid_ok(
     matched_detections = len(assigned) / max(1, len(panels))
     matched_cells = len(set(assigned.values())) / len(cells)
     mean_iou = sum(scores) / len(scores) if scores else 0.0
-    if (
+    # Equal panels, or the same grid with slightly different cell sizes.
+    # Surplus boxes on the cells are dropped. One outside the grid stays.
+    floating = (
         cover <= _FLOAT_COVER
         and ratio >= _FLOAT_RATIO
         and median_fill >= _FLOAT_FILL
         and matched_cells >= 0.75
         and len(panels) >= len(cells)
-    ):
-        return True
-    # Floating panels of slightly different sizes, every cell already found.
-    if (
+    )
+    tight = (
         cover <= _TIGHT_FLOAT_COVER
         and ratio >= _TIGHT_FLOAT_RATIO
         and median_fill >= _FLOAT_FILL
         and matched_cells >= _TIGHT_FLOAT_MATCH
         and mean_iou >= _ALIGNED_MEAN
         and len(panels) >= len(cells)
-    ):
-        return True
+    )
+    if floating or tight:
+        return _cells_and_strays(panels, cells)
     # A sheet with a wide margin. One box still covers two cells.
     if (
         _MID_COVER <= cover < _SHEET_COVER
@@ -241,28 +250,65 @@ def _grid_ok(
         and matched_detections >= _MID_MATCH
         and len(cells) >= len(panels) - 2
     ):
-        return True
+        return list(cells)
     if not (
         cover >= _SHEET_COVER
         and ratio >= _SIZE_RATIO
         and matched_detections >= 0.5
         and len(cells) >= len(panels)
     ):
-        return False
+        return None
     if len(cells) == len(panels):
         if mean_iou < _POOR_MEAN:
-            return True
+            return list(cells)
         # Same count and the same cells, but the edges sit off the rules.
         aligned = matched_detections >= _ALIGNED_MATCH and matched_cells >= _ALIGNED_MATCH
-        return mean_iou < _SNAP_MEAN and aligned
+        if mean_iou < _SNAP_MEAN and aligned:
+            return list(cells)
+        return None
     if _swallows(panels, cells):
-        return True
+        return list(cells)
     unmatched = [index for index in range(len(cells)) if index not in set(assigned.values())]
-    return (
+    if (
         len(unmatched) >= 3
         and len(unmatched) >= len(assigned)
         and all(max(iou(cells[index], panel) for panel in panels) < _CLEAR_IOU for index in unmatched)
-    )
+    ):
+        return list(cells)
+    return None
+
+
+def _cells_and_strays(panels: Sequence[Box], cells: Sequence[Box]) -> list[Box]:
+    """Ruled cells, plus a detection that sits outside the grid.
+
+    A second box on a cell is that panel again. A box inside the outer
+    rectangle is part of the same sheet, even when it misses every cell.
+    A panel or a title beside the grid is outside that rectangle.
+    """
+    strays = [panel for panel in panels if _outside_grid(panel, cells)]
+    return [*cells, *strays]
+
+
+def _sits_on(panel: Box, cells: Sequence[Box]) -> bool:
+    """True when the detection overlaps a cell, or one contains the other."""
+    for cell in cells:
+        if iou(panel, cell) >= _MATCH_IOU or contained_ratio(panel, cell) >= _MATCH_IOU:
+            return True
+        if contained_ratio(cell, panel) >= _SWALLOW:
+            return True
+    return False
+
+
+def _outside_grid(panel: Box, cells: Sequence[Box]) -> bool:
+    """True when the detection is beside the grid, not on it or inside it."""
+    if not cells or _sits_on(panel, cells):
+        return False
+    left = min(cell.x for cell in cells)
+    top = min(cell.y for cell in cells)
+    right = max(cell.x2 for cell in cells)
+    bottom = max(cell.y2 for cell in cells)
+    grid = Box(left, top, max(1, right - left), max(1, bottom - top))
+    return contained_ratio(panel, grid) < _MATCH_IOU
 
 
 def _interior_cell(

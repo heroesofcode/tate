@@ -78,6 +78,27 @@ def test_a_grid_the_detector_already_matched_is_kept() -> None:
         )
 
 
+def test_a_panel_beside_a_floating_grid_is_kept() -> None:
+    image = _tan_page(1400, 1600)
+    draw = ImageDraw.Draw(image)
+    cells = (
+        Box(60, 60, 320, 360),
+        Box(460, 60, 320, 360),
+        Box(60, 1100, 320, 360),
+        Box(460, 1100, 320, 360),
+    )
+    for cell in cells:
+        draw.rectangle((cell.x, cell.y, cell.x2 - 1, cell.y2 - 1), outline=(12, 10, 8), width=4)
+    # Insets sit on the cells. The right-hand panel has no frame.
+    extras = tuple(Box(cell.x + 10, cell.y + 16, cell.w - 24, cell.h - 28) for cell in cells[:2])
+    beside = Box(900, 400, 420, 700)
+    adopted = adopt_ruled_grid(image, (*cells, *extras, beside))
+    assert len(adopted) == 5
+    assert max(iou(beside, box) for box in adopted) > 0.9
+    for cell in cells:
+        assert max(iou(cell, box) for box in adopted) >= 0.7
+
+
 def test_slightly_unequal_floating_panels_drop_the_extra_boxes() -> None:
     image = _tan_page(1000, 1400)
     draw = ImageDraw.Draw(image)
