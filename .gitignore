@@ -1,11 +1,17 @@
 node_modules/
 dist/
+dev-dist/
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+playwright-report/
+test-results/
+blob-report/
+coverage/
 *.tate
 *.onnx
+*.log
 .DS_Store
