@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from tate.errors import TateError
@@ -102,15 +103,31 @@ def parse_page_range(spec: str, count: int) -> list[int]:
 
 
 def to_rgb(image: Image.Image) -> Image.Image:
+    """RGB on white, with the EXIF orientation already applied."""
     oriented = ImageOps.exif_transpose(image)
     current = image if oriented is None else oriented
     if current.mode == "RGB":
         return current
-    if current.mode == "RGBA":
-        background = Image.new("RGB", current.size, (255, 255, 255))
-        background.paste(current, mask=current.getchannel("A"))
-        return background
+    # Pillow's convert() ignores palette transparency and clips 16-bit gray.
+    if current.mode.startswith("I;16"):
+        return _gray16_to_rgb(current)
+    if current.mode in {"RGBA", "LA"} or (current.mode == "P" and "transparency" in current.info):
+        return _composite_on_white(current)
     return current.convert("RGB")
+
+
+def _composite_on_white(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    background = Image.new("RGB", rgba.size, (255, 255, 255))
+    background.paste(rgba, mask=rgba.getchannel("A"))
+    return background
+
+
+def _gray16_to_rgb(image: Image.Image) -> Image.Image:
+    values = np.asarray(image, dtype=np.uint32)
+    scaled = ((values * 255) + 32767) // 65535
+    gray = Image.fromarray(scaled.astype(np.uint8), mode="L")
+    return gray.convert("RGB")
 
 
 def open_image(data: bytes, limits: InputLimits, name: str) -> Image.Image:
