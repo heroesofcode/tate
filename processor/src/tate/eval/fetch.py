@@ -280,7 +280,9 @@ def _extract_pdf_member(archive_path: Path, member: str, folder: Path) -> Path:
     """Copy a PDF out of a verified archive once, so each page renders from disk."""
     if PurePosixPath(member).suffix.casefold() != ".pdf":
         raise TateError(f"pdf_page needs a PDF member: {member}")
-    target = folder / PurePosixPath(member).name
+    # One file per member path, so two members that share a basename never collide.
+    digest = hashlib.sha256(member.encode("utf-8")).hexdigest()[:16]
+    target = folder / f"{digest}.pdf"
     try:
         with zipfile.ZipFile(archive_path) as archive:
             try:
