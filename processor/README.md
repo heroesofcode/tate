@@ -90,3 +90,5 @@ uv run pytest
 ```
 
 `pytest -m network` calls the real model and is skipped unless `TATE_NETWORK_TESTS=1`. The other tests stay offline and draw their own pages.
+
+`uv run python scripts/pipeline_chapter.py OUT_DIR` draws synthetic pages, packs a CBZ, and runs `tate process` twice (`--detector cv`, then `--detector page`). The reader spec `web/e2e/pipeline.spec.ts` imports the `cv` package when `TATE_E2E_PACKAGE` points at it.

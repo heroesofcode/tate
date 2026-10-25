@@ -37,6 +37,8 @@ pnpm test:e2e
 
 Playwright drives a production build (`vite preview`) in Chromium at phone sizes. The synthetic `.tate` fixture is drawn at test time; no chapter images are stored in the repo.
 
+`e2e/pipeline.spec.ts` is skipped unless `TATE_E2E_PACKAGE` is a `.tate` file. Build one with `processor/scripts/pipeline_chapter.py` (synthetic pages, then `tate process` with the `cv` and `page` detectors) and point that variable at the `cv` package. The other Playwright tests do not need it.
+
 ## Architecture
 
 Hash routes (`#/` and `#/read/:id`) keep GitHub Pages on a single `index.html`. There is no client-side history fallback.

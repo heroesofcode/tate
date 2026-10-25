@@ -9,6 +9,7 @@ __pycache__/
 .mypy_cache/
 playwright-report/
 test-results/
+pipeline-out/
 blob-report/
 coverage/
 *.tate
