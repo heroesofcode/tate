@@ -140,6 +140,11 @@ def open_image(data: bytes, limits: InputLimits, name: str) -> Image.Image:
             warnings.simplefilter("ignore", Image.DecompressionBombWarning)
             try:
                 with Image.open(io.BytesIO(data)) as raw:
+                    # The header already has the size. Decoding a page over the
+                    # limit can be the slow part, and Pillow only aborts past
+                    # twice the cap.
+                    if raw.width * raw.height > limits.max_image_pixels:
+                        raise TateError(f"image is too large: {name}")
                     raw.load()
                     if raw.width * raw.height > limits.max_image_pixels:
                         raise TateError(f"image is too large: {name}")
