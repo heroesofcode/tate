@@ -206,11 +206,27 @@ def _recipe(page: PageAnn, parent_pixels: str | None) -> str:
 
 def _build_page(page: PageAnn, cache: Path, sources: dict[str, Source]) -> Image.Image:
     image = page.image
+    if isinstance(image, SourceImage) and image.crop is not None:
+        full = _build_source_page(page, image, cache, sources)
+        _, _, x2, y2 = image.crop
+        if x2 > full.width or y2 > full.height:
+            raise TateError(f"page {page.id} crop is outside the {full.width}x{full.height} image")
+        cropped = full.crop(image.crop)
+        full.close()
+        return cropped
+    if isinstance(image, SourceImage):
+        return _build_source_page(page, image, cache, sources)
     if isinstance(image, DeriveImage):
         with Image.open(page_png(cache, image.from_page)) as parent:
             parent.load()
             rgb = parent.convert("RGB")
         return render_ops(rgb, image.ops)
+    raise TateError(f"page {page.id} has an unknown image kind")
+
+
+def _build_source_page(
+    page: PageAnn, image: SourceImage, cache: Path, sources: dict[str, Source]
+) -> Image.Image:
     source = sources[image.source]
     blob = cache / "sources" / source.id
     if isinstance(source.fetch, ZipFetch):

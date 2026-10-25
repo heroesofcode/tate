@@ -114,6 +114,16 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
             "ci": True,
         },
         {
+            "id": "half",
+            "styles": ["standard"],
+            "image": {"source": "raster", "crop": [6, 0, 12, 8]},
+            "size": [6, 8],
+            "panels": [{"box": [0, 0, 3, 3]}],
+            "whole": False,
+            "balloons": [],
+            "ci": True,
+        },
+        {
             "id": "turned",
             "styles": ["skewed"],
             "image": {"derive": {"from": "base", "ops": [{"rotate": 90}]}},
@@ -146,6 +156,9 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
     turned = Image.open(page_png(cache, "turned"))
     assert turned.size == (8, 12)
     turned.close()
+    half = Image.open(page_png(cache, "half"))
+    assert half.size == (6, 8)
+    half.close()
     pdf_image = Image.open(page_png(cache, "from-pdf"))
     assert pdf_image.size == pdf_size
     pdf_image.close()
@@ -279,3 +292,29 @@ def test_download_retries_then_succeeds(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr("tate.eval.fetch.time.sleep", lambda _seconds: None)
     fetch_dataset(load_dataset(root), cache=tmp_path / "cache")
     assert attempts["n"] == 2
+
+
+def test_crop_outside_the_image_fails(tmp_path: Path) -> None:
+    raster = _png()
+    raster_path = tmp_path / "page.png"
+    raster_path.write_bytes(raster)
+    dataset_root = tmp_path / "dataset"
+    (dataset_root / "pages").mkdir(parents=True)
+    (dataset_root / "sources.json").write_text(
+        json.dumps([_source("raster", raster_path.as_uri(), _sha(raster))]) + "\n"
+    )
+    page = {
+        "id": "wide",
+        "styles": ["standard"],
+        "image": {"source": "raster", "crop": [0, 0, 20, 8]},
+        "size": [20, 8],
+        "panels": [{"box": [0, 0, 20, 8]}],
+        "whole": True,
+        "balloons": [],
+        "ci": True,
+    }
+    (dataset_root / "pages" / "demo.json").write_text(
+        json.dumps({"work": "demo", "title": "Demo", "direction": "rtl", "pages": [page]}) + "\n"
+    )
+    with pytest.raises(TateError, match="crop is outside"):
+        fetch_dataset(load_dataset(dataset_root), cache=tmp_path / "cache", subset="ci")

@@ -85,6 +85,7 @@ One of:
 - `{"source":"<id>"}` — the source is a single raster file.
 - `{"source":"<id>","member":"path/in/zip.jpg"}` — a member of a zip source. The member path is relative, with no `..`.
 - `{"source":"<id>","pdf_page":0}` — a PDF source (or a PDF member when `member` is also set). `pdf_page` is 0-based. The page is rasterized with the processor's `render_pdf_page`, so the pixels match `tate process`.
+- `"crop": [x1, y1, x2, y2]` may be added to any source image to keep one region of it, for example one page of a scanned open book. `size` and all boxes are then relative to the cropped image.
 - `{"derive":{"from":"<page id>","ops":[...]}}` — build the page from another dataset page.
 
 Derive ops, applied in order:

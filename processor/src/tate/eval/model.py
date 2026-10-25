@@ -80,6 +80,7 @@ class SourceImage:
     source: str
     member: str | None = None
     pdf_page: int | None = None
+    crop: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)

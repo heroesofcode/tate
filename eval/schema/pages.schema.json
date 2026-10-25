@@ -58,7 +58,13 @@
           "properties": {
             "source": { "type": "string" },
             "member": { "type": "string" },
-            "pdf_page": { "type": "integer", "minimum": 0 }
+            "pdf_page": { "type": "integer", "minimum": 0 },
+            "crop": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "minItems": 4,
+              "maxItems": 4
+            }
           }
         },
         {
