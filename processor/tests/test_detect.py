@@ -245,6 +245,32 @@ def test_fusion_restores_a_confident_box_cut_across_a_wide_hole() -> None:
     assert fused[0].w > 300
 
 
+def test_fusion_keeps_a_row_of_three_panels_under_a_wrapper() -> None:
+    image = Image.new("RGB", (900, 400), (40, 80, 140))
+    model = [Box(10, 10, 880, 380, 0.92)]
+    frames = [
+        Box(20, 20, 270, 360, 0.5),
+        Box(310, 20, 270, 360, 0.5),
+        Box(600, 20, 270, 360, 0.5),
+    ]
+    fused = fuse_detections(image, model, frames, [])
+    assert len(fused) == 3
+    assert {box.x for box in fused} == {20, 310, 600}
+
+
+def test_fusion_keeps_a_column_of_three_panels_under_a_wrapper() -> None:
+    image = Image.new("RGB", (400, 900), (40, 80, 140))
+    model = [Box(10, 10, 380, 880, 0.92)]
+    frames = [
+        Box(20, 20, 360, 270, 0.5),
+        Box(20, 310, 360, 270, 0.5),
+        Box(20, 600, 360, 270, 0.5),
+    ]
+    fused = fuse_detections(image, model, frames, [])
+    assert len(fused) == 3
+    assert {box.y for box in fused} == {20, 310, 600}
+
+
 def test_fusion_splits_a_low_score_box_on_a_gutter() -> None:
     image = Image.new("RGB", (400, 400), "white")
     model = [Box(20, 20, 360, 360, 0.3)]
