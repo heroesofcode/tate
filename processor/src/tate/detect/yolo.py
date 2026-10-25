@@ -11,6 +11,8 @@ import numpy as np
 from PIL import Image
 
 from tate.boxes import Box, Detection
+from tate.detect.cv import gutter_panels
+from tate.detect.frames import frame_panels, merge_panel_guides
 from tate.errors import TateError
 
 INPUT_SIZE = 1024
@@ -143,4 +145,7 @@ class YoloDetector:
                 panels.append(mapped)
             elif class_id == TEXT_CLASS and confidence >= TEXT_CONF:
                 texts.append(mapped)
-        return Detection(tuple(panels), tuple(texts))
+        frames = frame_panels(image)
+        gutters = gutter_panels(image)
+        merged = merge_panel_guides(panels, frames, gutters, page_w, page_h)
+        return Detection(tuple(merged), tuple(texts))
