@@ -78,10 +78,11 @@ def _shattered(pieces: Sequence[Box], page_w: int, page_h: int) -> bool:
     """True when the pieces are one picture broken up, not a row of panels.
 
     Panels meet at a narrow gutter. Pieces that overlap, or that leave a wide
-    hole between them, were cut out of a single drawing.
+    hole between neighbors, were cut out of a single drawing. A wide span
+    that only crosses another piece is that piece, not a hole.
     """
     for index, left in enumerate(pieces):
-        for right in pieces[index + 1 :]:
+        for offset, right in enumerate(pieces[index + 1 :]):
             if _relation(left, right, page_w, page_h) == "overlap":
                 return True
             y_overlap = _overlap(left.y, left.y2, right.y, right.y2) / max(1, min(left.h, right.h))
@@ -93,13 +94,46 @@ def _shattered(pieces: Sequence[Box], page_w: int, page_h: int) -> bool:
             if x_overlap > 0.45 and y_gap < -4:
                 return True
             if y_overlap > 0.45 and x_gap >= 0:
+                horizontal = True
                 gap, span = x_gap, page_w
             elif x_overlap > 0.45 and y_gap >= 0:
+                horizontal = False
                 gap, span = y_gap, page_h
             else:
                 continue
+            if _piece_between(pieces, index, index + 1 + offset, horizontal=horizontal):
+                continue
             if gap > max(48, int(0.05 * span)):
                 return True
+    return False
+
+
+def _piece_between(pieces: Sequence[Box], left_index: int, right_index: int, *, horizontal: bool) -> bool:
+    """True when another piece lies in the opening on the axis the pair shares."""
+    left, right = pieces[left_index], pieces[right_index]
+    if horizontal:
+        gap_start, gap_end = _span(left.x, left.x2, right.x, right.x2)
+        band_start, band_end = max(left.y, right.y), min(left.y2, right.y2)
+    else:
+        gap_start, gap_end = _span(left.y, left.y2, right.y, right.y2)
+        band_start, band_end = max(left.x, right.x), min(left.x2, right.x2)
+    band = band_end - band_start
+    if gap_end <= gap_start or band <= 0:
+        return False
+    for index, other in enumerate(pieces):
+        if index in (left_index, right_index):
+            continue
+        if horizontal:
+            start, end = other.x, other.x2
+            cross_start, cross_end, cross_span = other.y, other.y2, other.h
+        else:
+            start, end = other.y, other.y2
+            cross_start, cross_end, cross_span = other.x, other.x2, other.w
+        if end <= gap_start or start >= gap_end:
+            continue
+        shared = _overlap(cross_start, cross_end, band_start, band_end)
+        if shared / max(1, min(cross_span, band)) > 0.45:
+            return True
     return False
 
 
