@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 
 from tate.boxes import Box, contained_ratio, intersection_area, iou
+from tate.gutters import _crosses_box, _dark, _resize, full_span_divider, page_view
 
 _GUIDE_SCORE = 0.5
 _TARGET = 1100
@@ -122,12 +123,15 @@ def fuse_panels(
     guides: Sequence[Box],
     page_w: int,
     page_h: int,
+    image: Image.Image | None = None,
 ) -> list[Box]:
     """Split a primary box that covers several guides, and add guides it missed.
 
     One guide overlapping one primary box does not replace that box. A split
-    happens only when the guides tile that box. A detail drawn inside a panel,
-    or a second copy of a region already split, stays out.
+    happens only when the guides tile that box and the line between them is a
+    real frame or a paper gap that crosses the box. A detail drawn inside a
+    panel, or a second copy of a region already split, stays out. With no image
+    the geometry checks stand on their own.
     """
     prepared = _prepare_guides(guides, page_w, page_h)
     if not prepared:
@@ -138,11 +142,12 @@ def fuse_panels(
     # A box around most of the page is not itself a panel. A partition or a
     # tiling replaces it. So does a set of guides that reaches the frame.
     # Guides that float inside the box are insets on a splash, and the splash
-    # stays one panel.
+    # stays one panel. The replacement still needs a seam that crosses the box.
     if len(primary) == 1 and primary[0].area > 0.65 * page_area:
         covers = len(prepared) >= 3 and sum(guide.area for guide in prepared) > 0.35 * page_area
-        partitioned = _is_partition(primary[0], prepared) or _is_tiling(prepared, page_w, page_h)
-        if partitioned or (covers and not _floats_inside(primary[0], prepared)):
+        partitioned = _is_partition(primary[0], prepared, image) or _is_tiling(prepared, page_w, page_h)
+        reaches = covers and not _floats_inside(primary[0], prepared)
+        if (partitioned or reaches) and _seams_cross(image, prepared):
             return prepared
     used = [False] * len(prepared)
     fused: list[Box] = []
@@ -152,7 +157,7 @@ def fuse_panels(
             for index, guide in enumerate(prepared)
             if not used[index] and guide.area < box.area * 0.92 and contained_ratio(guide, box) >= 0.72
         ]
-        if _is_partition(box, [prepared[index] for index in inside]):
+        if _is_partition(box, [prepared[index] for index in inside], image):
             for index in inside:
                 used[index] = True
                 fused.append(prepared[index])
@@ -188,17 +193,19 @@ def merge_panel_guides(
     gutters: Sequence[Box],
     page_w: int,
     page_h: int,
+    image: Image.Image | None = None,
 ) -> list[Box]:
     """Frames split or fill gaps. A gutter tiling wins only when boxes overlap.
 
     When the model boxes are one region, a huge region, or a heavy overlap, an
-    aligned set of frame rectangles replaces them.
+    aligned set of frame rectangles replaces them. A seam is used only when it
+    is a real frame or a paper gap that crosses the box it divides.
     """
-    override = _aligned_override(primary, frames, page_w, page_h)
+    override = _aligned_override(primary, frames, page_w, page_h, image)
     if override is not None:
         return override
     guides = list(frames) if primary else [*frames, *gutters]
-    fused = fuse_panels(primary, guides, page_w, page_h)
+    fused = fuse_panels(primary, guides, page_w, page_h, image)
     if not primary or not _pairs_overlap(fused, _OVERLAP_IOU):
         return fused
     tiling = tiling_panels(gutters, page_w, page_h)
@@ -215,7 +222,130 @@ def tiling_panels(guides: Sequence[Box], page_w: int, page_h: int) -> list[Box]:
     return prepared
 
 
-def _is_partition(box: Box, guides: Sequence[Box]) -> bool:
+def _seams_cross(image: Image.Image | None, guides: Sequence[Box]) -> bool:
+    """True when the guides may replace the box they tile.
+
+    With no image the geometry checks stand on their own. A stroke that stops
+    inside one drawing does not split that drawing in two. One unproven
+    boundary does not throw away a larger tiling: the boxes were already a
+    partition, and dropping them would leave the page as a single panel.
+    """
+    if image is None:
+        return True
+    if len(guides) < 2:
+        return False
+    if len(guides) > 2:
+        return True
+    seams = _neighbor_seams(guides)
+    if len(seams) != 1:
+        return False
+    axis, cut, box = seams[0]
+    rgb, sheet, light = page_view(image)
+    if full_span_divider(rgb, sheet, box, axis, cut, allow_ink_rule=True, page_light=light):
+        return True
+    lum, scale = _resize(rgb)
+    paper = float(np.percentile(lum, 72))
+    dark = _dark(lum, paper)
+    if _crosses_box(lum, dark, paper, box, axis, cut, scale):
+        return True
+    return not _stroke_stops_short(rgb, box, axis, cut)
+
+
+def _stroke_stops_short(rgb: np.ndarray[Any, Any], box: Box, axis: str, cut: int) -> bool:
+    """True when ink sits on the cut but does not reach both ends of the box."""
+    height, width = int(rgb.shape[0]), int(rgb.shape[1])
+    x1, y1 = max(0, box.x), max(0, box.y)
+    x2, y2 = min(width, box.x2), min(height, box.y2)
+    band = 3
+    if axis == "x":
+        c0, c1 = max(0, cut - band), min(width, cut + band + 1)
+        if c1 <= c0 or y2 - y1 < 8:
+            return False
+        strip = rgb[y1:y2, c0:c1]
+    else:
+        c0, c1 = max(0, cut - band), min(height, cut + band + 1)
+        if c1 <= c0 or x2 - x1 < 8:
+            return False
+        strip = rgb[c0:c1, x1:x2]
+    if strip.size == 0:
+        return False
+    line = strip.astype(np.float32).mean(axis=2).mean(axis=1 if axis == "x" else 0)
+    span = int(line.shape[0])
+    if span < 8:
+        return False
+    dark = line < 140.0
+    if not bool(np.any(dark)):
+        return False
+    hits = np.flatnonzero(dark)
+    first = int(hits[0]) / span
+    last = int(hits[-1]) / span
+    if first <= 0.12 and last >= 0.88:
+        return False
+    cover = float(dark.mean())
+    return 0.12 <= cover <= 0.85 and (first > 0.12 or last < 0.88)
+
+
+def _neighbor_seams(guides: Sequence[Box]) -> list[tuple[str, int, Box]]:
+    found: list[tuple[str, int, Box]] = []
+    for index, left in enumerate(guides):
+        for right in guides[index + 1 :]:
+            seam = _pair_seam(left, right, guides)
+            if seam is not None:
+                found.append(seam)
+    return found
+
+
+def _pair_seam(left: Box, right: Box, guides: Sequence[Box]) -> tuple[str, int, Box] | None:
+    x_overlap = _overlap(left.x, left.x2, right.x, right.x2) / max(1, min(left.w, right.w))
+    y_overlap = _overlap(left.y, left.y2, right.y, right.y2) / max(1, min(left.h, right.h))
+    if y_overlap > 0.55 and x_overlap < 0.45:
+        axis = "x"
+    elif x_overlap > 0.55 and y_overlap < 0.45:
+        axis = "y"
+    else:
+        return None
+    if _guide_between(left, right, guides, axis):
+        return None
+    if axis == "x":
+        first, second = (left, right) if left.x <= right.x else (right, left)
+        if first.x2 <= second.x:
+            cut = (first.x2 + second.x) // 2
+        else:
+            cut = (max(first.x, second.x) + min(first.x2, second.x2)) // 2
+    else:
+        first, second = (left, right) if left.y <= right.y else (right, left)
+        if first.y2 <= second.y:
+            cut = (first.y2 + second.y) // 2
+        else:
+            cut = (max(first.y, second.y) + min(first.y2, second.y2)) // 2
+    return axis, cut, _union(left, right)
+
+
+def _guide_between(left: Box, right: Box, guides: Sequence[Box], axis: str) -> bool:
+    if axis == "x":
+        low = min(left.x + left.w / 2, right.x + right.w / 2)
+        high = max(left.x + left.w / 2, right.x + right.w / 2)
+        band_0, band_1 = min(left.y, right.y), max(left.y2, right.y2)
+        for guide in guides:
+            if guide is left or guide is right:
+                continue
+            center = guide.x + guide.w / 2
+            if low < center < high and _overlap(guide.y, guide.y2, band_0, band_1) > 0:
+                return True
+        return False
+    low = min(left.y + left.h / 2, right.y + right.h / 2)
+    high = max(left.y + left.h / 2, right.y + right.h / 2)
+    band_0, band_1 = min(left.x, right.x), max(left.x2, right.x2)
+    for guide in guides:
+        if guide is left or guide is right:
+            continue
+        center = guide.y + guide.h / 2
+        if low < center < high and _overlap(guide.x, guide.x2, band_0, band_1) > 0:
+            return True
+    return False
+
+
+def _is_partition(box: Box, guides: Sequence[Box], image: Image.Image | None = None) -> bool:
     """True when the guides are siblings that fill the box, not details inside it."""
     if len(guides) < 2 or box.area <= 0:
         return False
@@ -237,7 +367,7 @@ def _is_partition(box: Box, guides: Sequence[Box]) -> bool:
                 return False
             if contained_ratio(left, right) > 0.55 or contained_ratio(right, left) > 0.55:
                 return False
-    return True
+    return _seams_cross(image, list(guides))
 
 
 def _floats_inside(box: Box, guides: Sequence[Box]) -> bool:
@@ -278,6 +408,7 @@ def _aligned_override(
     frames: Sequence[Box],
     page_w: int,
     page_h: int,
+    image: Image.Image | None = None,
 ) -> list[Box] | None:
     tiling = tiling_panels(frames, page_w, page_h)
     if len(tiling) < 3 or len(tiling) < len(primary):
@@ -285,6 +416,8 @@ def _aligned_override(
     if not _shares_edges(tiling, page_w, page_h):
         return None
     if not _detection_is_broken(primary, page_w, page_h):
+        return None
+    if not _seams_cross(image, tiling):
         return None
     return tiling
 

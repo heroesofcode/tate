@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 from tate.boxes import Box, Detection, clean_panels, drop_slivers, separate_overlaps
 from tate.debug import draw_debug
 from tate.detect.page import PageDetector
-from tate.gutters import _valley_shoulders, split_on_gutters
+from tate.gutters import _valley_shoulders, absorb_slivers, split_on_gutters
 from tate.ink import cover_boxes
 from tate.layout import (
     MAX_SEGMENT_HEIGHT,
@@ -518,6 +518,59 @@ def test_a_tall_side_panel_is_not_split_by_the_neighbouring_column_rule() -> Non
     assert len(tall_parts) == 1
     assert tall_parts[0].y <= 40
     assert tall_parts[0].y2 >= 850
+
+
+def test_a_line_that_stops_short_of_the_panel_is_not_a_gutter() -> None:
+    image = Image.new("RGB", (800, 520), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 770, 490), fill=(210, 210, 210))
+    draw.line((400, 110, 400, 390), fill=(0, 0, 0), width=5)
+    draw.ellipse((140, 160, 280, 340), outline=(0, 0, 0), width=4)
+    parts = split_on_gutters(image, [Box(30, 30, 740, 460)])
+    assert len(parts) == 1
+    image.close()
+
+
+def test_a_thin_fragment_without_a_gutter_rejoins_its_panel() -> None:
+    image = Image.new("RGB", (900, 900), (232, 220, 186))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 24, 876, 300), fill=(72, 84, 64))
+    for origin in (690, 760, 830):
+        draw.rectangle((origin, 36, origin + 30, 288), fill=(18, 18, 18))
+    draw.rectangle((24, 480, 400, 860), fill=(40, 40, 40))
+    draw.rectangle((480, 480, 876, 860), fill=(50, 50, 50))
+    wide = Box(24, 24, 640, 276)
+    slivers = (Box(680, 24, 52, 276), Box(748, 24, 44, 276), Box(818, 24, 52, 276))
+    kept = absorb_slivers(image, [wide, *slivers])
+    assert len(kept) == 1
+    assert kept[0].x <= 24 and kept[0].x2 >= 860
+    right = Box(480, 480, 396, 380)
+    left = Box(24, 480, 376, 380)
+    laid = layout_page(
+        image,
+        Detection((wide, *slivers, right, left), ()),
+        page_index=0,
+        width=400,
+        direction="rtl",
+    )
+    assert laid.fallback is False
+    assert len(laid.segments) == 3
+    top = laid.segments[0].panel
+    assert top.w > 700
+    assert laid.segments[1].panel.x > laid.segments[2].panel.x
+    image.close()
+
+
+def test_a_narrow_panel_across_a_paper_gap_is_not_a_sliver() -> None:
+    image = Image.new("RGB", (800, 600), "white")
+    draw = ImageDraw.Draw(image)
+    wide = Box(30, 40, 520, 500)
+    narrow = Box(580, 40, 48, 500)
+    draw.rectangle((wide.x, wide.y, wide.x2, wide.y2), fill=(30, 30, 30))
+    draw.rectangle((narrow.x, narrow.y, narrow.x2, narrow.y2), fill=(20, 20, 20))
+    kept = absorb_slivers(image, [wide, narrow])
+    assert len(kept) == 2
+    image.close()
 
 
 def test_a_hairline_gap_is_a_gutter_only_beside_a_solid_drawing() -> None:

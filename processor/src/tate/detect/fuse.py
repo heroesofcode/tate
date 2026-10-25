@@ -37,7 +37,7 @@ def fuse_detections(
     page_w, page_h = image.size
     if page_w < 2 or page_h < 2:
         return [box.clamp(page_w, page_h) for box in model]
-    merged = merge_panel_guides(model, frames, gutters, page_w, page_h)
+    merged = merge_panel_guides(model, frames, gutters, page_w, page_h, image)
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
     background = background_color(rgb)
     restored = _restore_shattered(merged, model, page_w, page_h)
