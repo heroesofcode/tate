@@ -18,6 +18,7 @@ from tate.layout import PageLayout
 
 INK_LUMINANCE = 200
 PAPER_DISTANCE = 30.0
+DARK_BACKGROUND_SHARE = 0.8
 BORDER_FRAC = 0.02
 MARGIN_FRAC = 0.01
 BALLOON_COVER = 0.98
@@ -389,7 +390,7 @@ def ink_masks(
     luminance = _luminance(rgb)
     ink = luminance < INK_LUMINANCE
     paper = _paper_color(rgb)
-    paper_dark = float(0.299 * paper[0] + 0.587 * paper[1] + 0.114 * paper[2]) < INK_LUMINANCE
+    paper_dark = _dark_background(luminance, ignore)
     if color or paper_dark:
         delta = rgb.astype(np.float64) - paper
         distance = np.sqrt(np.square(delta).sum(axis=2))
@@ -498,6 +499,30 @@ def _paper_color(rgb: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     pixels = rgb[mask].astype(np.float64)
     median = np.median(pixels, axis=0)
     return np.asarray(median, dtype=np.float64)
+
+
+def _dark_background(luminance: np.ndarray[Any, Any], ignore: Sequence[Box]) -> bool:
+    """True when the ring just inside the margin is dark nearly all the way round.
+
+    A dark scan edge or a frame on one side covers only part of the ring, so a
+    white page with dark edges still reads as white paper.
+    """
+    height, width = int(luminance.shape[0]), int(luminance.shape[1])
+    ring = np.zeros((height, width), dtype=np.bool_)
+    outer_y, outer_x = _edge(height, MARGIN_FRAC), _edge(width, MARGIN_FRAC)
+    inner_y = min(height // 2, outer_y + _edge(height, BORDER_FRAC))
+    inner_x = min(width // 2, outer_x + _edge(width, BORDER_FRAC))
+    ring[outer_y:inner_y, outer_x : width - outer_x] = True
+    ring[height - inner_y : height - outer_y, outer_x : width - outer_x] = True
+    ring[outer_y : height - outer_y, outer_x:inner_x] = True
+    ring[outer_y : height - outer_y, width - inner_x : width - outer_x] = True
+    for box in ignore:
+        _fill(ring, box, False)
+    count = int(np.count_nonzero(ring))
+    if count == 0:
+        return False
+    dark = int(np.count_nonzero(np.logical_and(ring, luminance < INK_LUMINANCE)))
+    return dark >= DARK_BACKGROUND_SHARE * count
 
 
 def _clear_margin(ink: np.ndarray[Any, Any], width: int, height: int) -> None:
