@@ -1,0 +1,106 @@
+import hashlib
+import os
+from types import SimpleNamespace
+from typing import Any
+
+import numpy as np
+import pytest
+from PIL import Image, ImageDraw
+from tests.pages import grid_page
+
+from tate.boxes import contained_ratio
+from tate.detect.cv import CvDetector
+from tate.detect.model import MODEL_SHA256, MODEL_URL, write_verified
+from tate.detect.yolo import PANEL_CONF, YoloDetector
+from tate.errors import TateError
+
+
+def test_model_pin_is_the_published_export() -> None:
+    assert MODEL_SHA256 == "e66667bc6d5f00013ff27efc15d21e521825369d44dfd5d7f6e43cda2ca512b7"
+    assert "f6b7f3cb2bada1ec7d8b16501f9c984890811445" in MODEL_URL
+
+
+def test_write_verified_refuses_a_mismatch_and_leaves_no_partial(tmp_path: Any) -> None:
+    dest = tmp_path / "model.onnx"
+    with pytest.raises(TateError, match="sha256"):
+        write_verified(b"not a model", dest, "0" * 64)
+    assert not dest.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_verified_replaces_atomically(tmp_path: Any) -> None:
+    dest = tmp_path / "cache" / "model.onnx"
+    data = b"weights"
+    write_verified(data, dest, hashlib.sha256(data).hexdigest())
+    assert dest.read_bytes() == data
+    assert not list(dest.parent.glob(".*.part"))
+
+
+def test_yolo_maps_letterboxed_boxes() -> None:
+    image = Image.new("RGB", (200, 400), "white")
+
+    class FakeSession:
+        def get_inputs(self) -> list[SimpleNamespace]:
+            return [SimpleNamespace(name="images")]
+
+        def run(self, _names: object, feed: dict[str, np.ndarray[Any, Any]]) -> list[np.ndarray[Any, Any]]:
+            tensor = feed["images"]
+            assert tensor.shape == (1, 3, 1024, 1024)
+            assert tensor.dtype == np.float32
+            assert float(tensor.min()) >= 0.0
+            assert float(tensor.max()) <= 1.0
+            output = np.zeros((1, 300, 6), dtype=np.float32)
+            output[0, 0] = (256, 0, 768, 1024, 0.9, 0)
+            output[0, 1] = (400, 100, 500, 200, 0.8, 1)
+            output[0, 2] = (10, 10, 40, 40, PANEL_CONF - 0.05, 0)
+            return [output]
+
+    detection = YoloDetector(FakeSession()).detect(image)
+    assert len(detection.panels) == 1
+    panel = detection.panels[0]
+    assert panel.x == 0
+    assert panel.y == 0
+    assert panel.w == 200
+    assert panel.h == 400
+    assert len(detection.texts) == 1
+    text = detection.texts[0]
+    assert text.x == pytest.approx(56, abs=1)
+    assert text.y == pytest.approx(39, abs=1)
+
+
+def test_cv_finds_four_panels_and_a_bleed_panel() -> None:
+    detection = CvDetector().detect(grid_page())
+    assert len(detection.panels) == 4
+    assert detection.texts == ()
+
+    image = Image.new("RGB", (800, 1000), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 40, 340, 960), fill=(200, 200, 200), outline=(0, 0, 0), width=8)
+    draw.rectangle((430, 0, 799, 999), fill=(170, 170, 170))
+    found = CvDetector().detect(image)
+    bleed = next(box for box in found.panels if box.x2 > 700)
+    assert contained_ratio(type(bleed)(430, 0, 360, 900), bleed) > 0.8 or bleed.w > 300
+
+
+def test_auto_falls_back_when_the_model_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("TATE_MODEL_PATH", "missing-model.onnx")
+    from tate.detect import resolve_detector
+
+    detector = resolve_detector("auto")
+    assert detector.name == "cv"
+    assert "warning" in capsys.readouterr().err
+    with pytest.raises(TateError, match="TATE_MODEL_PATH"):
+        resolve_detector("yolo")
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("TATE_NETWORK_TESTS") != "1", reason="set TATE_NETWORK_TESTS=1")
+def test_real_model_finds_panels_on_a_synthetic_page() -> None:
+    from tate.detect.model import ensure_model
+    from tate.detect.yolo import load_session
+
+    detection = YoloDetector(load_session(ensure_model())).detect(grid_page())
+    assert len(detection.panels) >= 2
