@@ -3,6 +3,22 @@ import { PackageError } from './errors';
 import { LIMITS, type UnzipLimits } from './limits';
 import { isSafeZipPath } from './paths';
 
+/** True when the bytes end like a real zip, including an empty archive. */
+function hasCentralDirectoryEnd(data: Uint8Array): boolean {
+  const start = Math.max(0, data.length - 22 - 0xffff);
+  for (let offset = data.length - 22; offset >= start; offset -= 1) {
+    if (
+      data[offset] === 0x50 &&
+      data[offset + 1] === 0x4b &&
+      data[offset + 2] === 0x05 &&
+      data[offset + 3] === 0x06
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function unzipArchive(
   data: Uint8Array,
   limits: UnzipLimits = LIMITS,
@@ -99,5 +115,7 @@ export function unzipArchive(
     throw new PackageError('bad_zip');
   }
   if (failure) throw failure;
+  // A truncated or random file can yield no entries without throwing.
+  if (out.size === 0 && !hasCentralDirectoryEnd(data)) throw new PackageError('bad_zip');
   return out;
 }
