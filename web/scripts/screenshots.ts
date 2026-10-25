@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { chromium, devices } from '@playwright/test';
 import { createFixtureTate } from '../e2e/fixture';
 
-const out = '/workspace/tate-brief/out2';
+const out = process.env.SHOT_DIR ?? 'screenshots';
 const base = process.env.SHOT_URL ?? 'http://127.0.0.1:4173/tate/';
 
 await mkdir(out, { recursive: true });
