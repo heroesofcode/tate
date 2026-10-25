@@ -10,6 +10,17 @@ def test_grid_is_right_to_left_then_down() -> None:
         Box(120, 120, 100, 100),
     ]
     assert reading_order(boxes) == [1, 0, 3, 2]
+    assert reading_order(boxes, "rtl") == [1, 0, 3, 2]
+
+
+def test_grid_is_left_to_right_then_down() -> None:
+    boxes = [
+        Box(0, 0, 100, 100),
+        Box(120, 0, 100, 100),
+        Box(0, 120, 100, 100),
+        Box(120, 120, 100, 100),
+    ]
+    assert reading_order(boxes, "ltr") == [0, 1, 2, 3]
 
 
 def test_tall_panel_on_the_right_is_read_first() -> None:
@@ -19,6 +30,24 @@ def test_tall_panel_on_the_right_is_read_first() -> None:
         Box(120, 0, 100, 200),
     ]
     assert reading_order(boxes) == [2, 0, 1]
+
+
+def test_tall_left_column_is_read_first_left_to_right() -> None:
+    boxes = [
+        Box(120, 0, 100, 90),
+        Box(120, 110, 100, 90),
+        Box(0, 0, 100, 200),
+    ]
+    assert reading_order(boxes, "ltr") == [2, 0, 1]
+
+
+def test_tall_right_column_is_read_last_left_to_right() -> None:
+    boxes = [
+        Box(0, 0, 100, 90),
+        Box(0, 110, 100, 90),
+        Box(120, 0, 100, 200),
+    ]
+    assert reading_order(boxes, "ltr") == [0, 1, 2]
 
 
 def test_tall_panel_on_the_left_is_read_last() -> None:

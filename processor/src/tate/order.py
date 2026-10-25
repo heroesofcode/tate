@@ -1,24 +1,38 @@
-"""Japanese reading order for panel boxes: right to left, top to bottom."""
+"""Reading order for panel boxes: Japanese right to left, or Western left to right."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 from tate.boxes import Box
 
+ReadingDirection = Literal["rtl", "ltr"]
 
-def reading_order(boxes: Sequence[Box]) -> list[int]:
-    """Return indices of `boxes` in manga reading order.
+
+def reading_order(boxes: Sequence[Box], direction: ReadingDirection = "rtl") -> list[int]:
+    """Return indices of `boxes` in reading order.
 
     Horizontal gutters are cut first (top band, then the band below). When a
-    panel is tall enough to block that cut, the page is cut into columns and
-    the right column is read first. Small overlaps are ignored so a detector
-    that bleeds across a gutter still produces a clean cut.
+    panel is tall enough to block that cut, the page is cut into columns.
+    ``rtl`` reads the right column first; ``ltr`` reads the left column first.
+    ``ltr`` is ``rtl`` on boxes mirrored in x, so both directions share one
+    algorithm. Small overlaps are ignored so a detector that bleeds across a
+    gutter still produces a clean cut.
     """
+    if direction == "ltr":
+        boxes = [_mirror_x(box) for box in boxes]
+    elif direction != "rtl":
+        raise ValueError("direction must be rtl or ltr")
     indices = list(range(len(boxes)))
     if len(indices) <= 1:
         return indices
     return _order(indices, boxes, _tolerance(boxes))
+
+
+def _mirror_x(box: Box) -> Box:
+    """Reflect a box across x = 0. Width and the other fields stay put."""
+    return Box(-box.x2, box.y, box.w, box.h, box.score)
 
 
 def _tolerance(boxes: Sequence[Box]) -> int:
