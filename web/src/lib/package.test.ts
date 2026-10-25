@@ -182,6 +182,39 @@ describe('unsafe archives', () => {
     expect(() => unzipArchive(absolute)).toThrow(PackageError);
   });
 
+  it('rejects an oversized archive before reading it', async () => {
+    let reads = 0;
+    const source = {
+      name: 'huge.tate',
+      size: LIMITS.maxArchiveBytes + 1,
+      arrayBuffer() {
+        reads += 1;
+        return Promise.resolve(new ArrayBuffer(4));
+      },
+    };
+    await expect(importPackage(source as Blob & { name: string })).rejects.toMatchObject({
+      code: 'too_large',
+    });
+    expect(reads).toBe(0);
+  });
+
+  it('still reads an archive that sits on the size cap', async () => {
+    let reads = 0;
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const source = {
+      name: 'edge.tate',
+      size: LIMITS.maxArchiveBytes,
+      arrayBuffer() {
+        reads += 1;
+        return Promise.resolve(bytes.buffer);
+      },
+    };
+    await expect(importPackage(source as Blob & { name: string })).rejects.toSatisfy(
+      (error: PackageError) => error instanceof PackageError && error.code !== 'too_large',
+    );
+    expect(reads).toBe(1);
+  });
+
   it('rejects archives that declare or expand past the size limit', () => {
     const big = new Uint8Array(4000);
     const zipped = zipSync({ 'big.bin': big, 'also.bin': new Uint8Array(4000) });

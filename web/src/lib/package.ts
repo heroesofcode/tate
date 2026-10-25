@@ -1,7 +1,7 @@
 import { strFromU8 } from 'fflate';
 import { PackageError } from './errors';
 import { readImageSize } from './image-size';
-import { MAX_SEGMENTS } from './limits';
+import { LIMITS, MAX_SEGMENTS } from './limits';
 import { validateManifest } from './manifest';
 import { naturalCompare } from './natural-sort';
 import { basename, fileStem, isImagePath, mimeForPath } from './paths';
@@ -135,6 +135,7 @@ async function importCbz(
 }
 
 export async function importPackage(file: Blob & { name?: string }): Promise<ImportedChapter> {
+  if (file.size > LIMITS.maxArchiveBytes) throw new PackageError('too_large');
   const name = file.name || 'chapter.tate';
   const forceTate = name.toLowerCase().endsWith('.tate');
   const bytes = new Uint8Array(await file.arrayBuffer());
