@@ -28,7 +28,9 @@ def _panels(image: Image.Image) -> list[Box]:
     height, width = int(gray.shape[0]), int(gray.shape[1])
     if height < 2 or width < 2:
         return []
-    _level, white_any = cv2.threshold(gray, 245, 255, cv2.THRESH_BINARY)
+    paper = float(np.percentile(gray, 72))
+    level = min(40.0, max(1.0, paper - 20.0)) if paper < 110 else max(1.0, paper - 26.0)
+    _bin, white_any = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY)
     white = cast(np.ndarray[Any, Any], white_any)
     content = cast(np.ndarray[Any, Any], cv2.bitwise_not(white))
     gap = max(3, round(min(height, width) * 0.01))

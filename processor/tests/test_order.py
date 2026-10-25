@@ -83,6 +83,21 @@ def test_slight_vertical_overlap_still_splits_rows() -> None:
     assert reading_order(boxes) == [1, 0, 3, 2]
 
 
+def test_side_by_side_strips_are_read_a_column_at_a_time() -> None:
+    boxes = [
+        Box(0, 0, 100, 100),
+        Box(0, 120, 100, 100),
+        Box(0, 240, 100, 100),
+        Box(0, 360, 100, 100),
+        Box(160, 0, 100, 100),
+        Box(160, 120, 100, 100),
+        Box(160, 240, 100, 100),
+        Box(160, 360, 100, 100),
+    ]
+    assert reading_order(boxes, "ltr") == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert reading_order(boxes) == [4, 5, 6, 7, 0, 1, 2, 3]
+
+
 def test_staircase_falls_back_to_rows() -> None:
     # Right panel blocks a horizontal cut; the bottom banner blocks a vertical one.
     boxes = [

@@ -21,6 +21,7 @@ from tate.boxes import (
     union_box,
 )
 from tate.detect.cv import recover_uncovered
+from tate.gutters import split_on_gutters
 from tate.ink import cover_boxes, stroke_coverage
 from tate.order import ReadingDirection, reading_order
 
@@ -29,8 +30,9 @@ MAX_SEGMENT_HEIGHT = 4096
 SPREAD_RATIO = 1.2
 PAD_FRAC = 0.004
 TEXT_OVERLAP = 0.30
-OVERLAP_IOU = 0.45
+OVERLAP_IOU = 0.60
 INK_COVERAGE_MIN = 0.68
+STROKE_COVERAGE_MIN = 0.40
 INK_LEVEL = 240
 BACKGROUND_RGB = (255, 255, 255)
 BACKGROUND_HEX = "#ffffff"
@@ -190,7 +192,7 @@ def layout_page(
     page_w, page_h = image.size
     cleaned = _prepare_panels(image, detection.panels)
     texts = prepare_texts(detection.texts, page_w, page_h)
-    spread = page_w > page_h * SPREAD_RATIO
+    spread = _is_spread(page_w, page_h, cleaned)
     ordered = [cleaned[index] for index in reading_order(cleaned, direction)]
     if spread or _cut_splash(image, cleaned) or _unreliable(cleaned, image):
         whole = Box(0, 0, page_w, page_h)
@@ -234,12 +236,55 @@ def _prepare_panels(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     page_w, page_h = image.size
     cleaned = clean_panels(panels, page_w, page_h)
     cleaned = drop_slivers(cleaned, page_w, page_h)
+    cleaned = split_on_gutters(image, cleaned)
+    cleaned = clean_panels(cleaned, page_w, page_h)
+    cleaned = drop_slivers(cleaned, page_w, page_h)
     recovered = recover_uncovered(image, cleaned)
     if recovered:
         # A recovered column is a missed region, not a thin edge of a panel
         # already found, so sliver cleanup does not see it.
         cleaned = clean_panels([*cleaned, *recovered], page_w, page_h)
     return separate_overlaps(cleaned)
+
+
+def _is_spread(page_w: int, page_h: int, panels: Sequence[Box]) -> bool:
+    """A spread is two facing pages, not a landscape page of panels.
+
+    A wide page with several panels, or with more than one row, is laid out
+    panel by panel. A wide page with no panel split, or with exactly two
+    boxes that cover the left and right halves, stays one piece.
+    """
+    if page_w <= page_h * SPREAD_RATIO:
+        return False
+    if len(panels) >= 3 or _row_count(panels) >= 2:
+        return False
+    if len(panels) <= 1:
+        return True
+    return _facing_pages(panels, page_w, page_h)
+
+
+def _row_count(panels: Sequence[Box]) -> int:
+    if not panels:
+        return 0
+    ordered = sorted(panels, key=lambda box: box.y)
+    rows = 1
+    bottom = ordered[0].y2
+    for box in ordered[1:]:
+        if box.y >= bottom - max(4, round(box.h * 0.2)):
+            rows += 1
+            bottom = box.y2
+        else:
+            bottom = max(bottom, box.y2)
+    return rows
+
+
+def _facing_pages(panels: Sequence[Box], page_w: int, page_h: int) -> bool:
+    left, right = sorted(panels, key=lambda box: box.x)
+    if left.x2 > page_w * 0.58 or right.x < page_w * 0.42:
+        return False
+    tall = left.h >= page_h * 0.7 and right.h >= page_h * 0.7
+    wide = left.w >= page_w * 0.3 and right.w >= page_w * 0.3
+    return tall and wide
 
 
 def _cut_splash(image: Image.Image, panels: Sequence[Box]) -> bool:
@@ -294,7 +339,11 @@ def _paper_between(image: Image.Image, first: Box, second: Box, axis: str) -> bo
     if band.size == 0:
         return False
     tone = band.astype(np.uint16).sum(axis=2) // 3
-    return float(np.mean(tone >= 245)) > 0.6
+    # A gutter matches the paper tone of this band. Fixed white misses a tan scan.
+    paper = float(np.percentile(tone, 80))
+    if paper < 110:
+        return False
+    return float(np.mean(tone >= paper - 18)) > 0.6
 
 
 def _unreliable(panels: Sequence[Box], image: Image.Image) -> bool:
@@ -307,7 +356,10 @@ def _unreliable(panels: Sequence[Box], image: Image.Image) -> bool:
     strokes = stroke_coverage(image, panels)
     if strokes is None:
         return ink_coverage(image, panels) < INK_COVERAGE_MIN
-    return strokes < INK_COVERAGE_MIN
+    # Frame rules and colour that bleeds past a correct box are still strokes.
+    # Only a detection that leaves most of the drawing outside is unreliable;
+    # the crops grow afterwards, so the rest of the ink is not dropped.
+    return strokes < STROKE_COVERAGE_MIN
 
 
 def _segments_for_box(

@@ -15,7 +15,9 @@ def reading_order(boxes: Sequence[Box], direction: ReadingDirection = "rtl") -> 
 
     Horizontal gutters are cut first (top band, then the band below). When a
     panel is tall enough to block that cut, the page is cut into columns.
-    ``rtl`` reads the right column first; ``ltr`` reads the left column first.
+    Side-by-side strips are the exception: if every column is a stack of four
+    or more panels, each strip is finished before the next. ``rtl`` reads the
+    right column first; ``ltr`` reads the left column first.
     ``ltr`` is ``rtl`` on boxes mirrored in x, so both directions share one
     algorithm. Small overlaps are ignored so a detector that bleeds across a
     gutter still produces a clean cut.
@@ -44,9 +46,15 @@ def _tolerance(boxes: Sequence[Box]) -> int:
 def _order(indices: list[int], boxes: Sequence[Box], tolerance: int) -> list[int]:
     if len(indices) <= 1:
         return list(indices)
+    columns = _column_stacks(indices, boxes, tolerance)
+    if columns is not None:
+        ordered: list[int] = []
+        for group in reversed(columns):
+            ordered.extend(_order(group, boxes, tolerance))
+        return ordered
     horizontal = _groups_by_gaps(indices, boxes, "y", tolerance)
     if horizontal is not None:
-        ordered: list[int] = []
+        ordered = []
         for group in horizontal:
             ordered.extend(_order(group, boxes, tolerance))
         return ordered
@@ -109,6 +117,29 @@ def _groups_by_gaps(
     if len(groups) <= 1:
         return None
     return groups
+
+
+def _column_stacks(
+    indices: list[int],
+    boxes: Sequence[Box],
+    tolerance: int,
+) -> list[list[int]] | None:
+    """Side-by-side strips: each column is its own stack of at least four panels.
+
+    A normal row of two or three panels is left to the horizontal cut. A strip
+    page is the case where every column separates into four or more single
+    panels, so the reader finishes one strip before the next.
+    """
+    columns = _groups_by_gaps(indices, boxes, "x", tolerance)
+    if columns is None or len(columns) < 2:
+        return None
+    if any(len(column) < 4 for column in columns):
+        return None
+    for column in columns:
+        rows = _groups_by_gaps(column, boxes, "y", tolerance)
+        if rows is None or len(rows) < 4 or any(len(row) != 1 for row in rows):
+            return None
+    return columns
 
 
 def _vertical_overlap(a: Box, b: Box) -> float:
