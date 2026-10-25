@@ -498,6 +498,28 @@ def test_a_frame_rule_between_two_cells_is_a_gutter() -> None:
     assert parts[0].x2 <= parts[1].x
 
 
+def test_a_tall_side_panel_is_not_split_by_the_neighbouring_column_rule() -> None:
+    """A frame rule across one column must not cut the tall panel beside it."""
+    image = Image.new("RGB", (1000, 900), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 590, 430), outline=(0, 0, 0), width=6)
+    draw.rectangle((30, 450, 590, 860), outline=(0, 0, 0), width=6)
+    draw.rectangle((70, 80, 280, 250), fill=(0, 0, 0))
+    draw.rectangle((70, 520, 280, 720), fill=(0, 0, 0))
+    draw.rectangle((640, 30, 970, 860), outline=(0, 0, 0), width=6)
+    draw.rectangle((680, 80, 930, 820), fill=(30, 30, 30))
+    column = Box(30, 30, 560, 830)
+    tall = Box(640, 30, 330, 830)
+    parts = split_on_gutters(image, [column, tall])
+    column_parts = [part for part in parts if part.x2 <= 600]
+    tall_parts = [part for part in parts if part.x >= 600]
+    assert len(column_parts) == 2
+    assert column_parts[0].y2 <= column_parts[1].y
+    assert len(tall_parts) == 1
+    assert tall_parts[0].y <= 40
+    assert tall_parts[0].y2 >= 850
+
+
 def test_a_hairline_gap_is_a_gutter_only_beside_a_solid_drawing() -> None:
     assert _valley_shoulders("valley", 1, 0.20, 0.20) is False
     assert _valley_shoulders("valley", 1, 0.90, 0.20) is True

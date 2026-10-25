@@ -1,10 +1,12 @@
 """Split a box that covers several panels along the gutters between them.
 
 A gutter is either a band of paper with drawings on both sides, or a thin dark
-rule whose shoulders are paper. A hairline white gap is not a gutter. Cuts are
-searched inside one row at a time, because a vertical rule usually stops at the
-horizontal gutter. Nothing here is tuned to a particular page: a cut is kept
-only when both pieces are large and inky.
+rule whose shoulders are paper. A hairline white gap is not a gutter. A cut
+splits a box only when that gutter crosses the box, edge to edge apart from a
+short tolerance, so a rule through one column does not slice the panel beside
+it. Cuts are searched inside one row at a time, because a vertical rule usually
+stops at the horizontal gutter. Nothing here is tuned to a particular page: a
+cut is kept only when both pieces are large and inky.
 """
 
 from __future__ import annotations
@@ -37,9 +39,9 @@ def split_on_gutters(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
         box = panel.clamp(page_w, page_h)
         if box.w < 2 or box.h < 2:
             continue
-        for band in _apply(box, y_cuts, "y", page_w, page_h, dark, scale):
+        for band in _apply(box, y_cuts, "y", page_w, page_h, dark, lum, paper, scale):
             x_cuts = _cuts(dark, lum, paper, scale, page_w, axis=1, limit=band)
-            pieces.extend(_apply(band, x_cuts, "x", page_w, page_h, dark, scale))
+            pieces.extend(_apply(band, x_cuts, "x", page_w, page_h, dark, lum, paper, scale))
     return pieces
 
 
@@ -270,6 +272,156 @@ def _dedupe(cuts: list[int], gap: int) -> list[int]:
     return kept
 
 
+def _crosses_box(
+    lum: np.ndarray[Any, Any],
+    dark: np.ndarray[Any, Any],
+    paper: float,
+    box: Box,
+    axis: str,
+    cut: int,
+    scale: float,
+) -> bool:
+    """True when a frame rule or a paper gap at ``cut`` crosses ``box``.
+
+    The mark is measured inside the box, not on the rest of the page. It may
+    stop a little short of each edge. ``axis`` ``"y"`` is a horizontal line.
+    """
+    height, width = int(lum.shape[0]), int(lum.shape[1])
+    y1 = _index(box.y, scale, height)
+    y2 = _index(box.y2, scale, height)
+    x1 = _index(box.x, scale, width)
+    x2 = _index(box.x2, scale, width)
+    if y2 - y1 < 8 or x2 - x1 < 8:
+        return False
+    if axis == "y":
+        local = _index(cut, scale, height) - y1
+        view = lum[y1:y2, x1:x2]
+        ink = dark[y1:y2, x1:x2]
+        page_span = height
+    else:
+        local = _index(cut, scale, width) - x1
+        view = np.transpose(lum[y1:y2, x1:x2])
+        ink = np.transpose(dark[y1:y2, x1:x2])
+        page_span = width
+    if view.size == 0 or not (-2 <= local <= int(view.shape[0]) + 1):
+        return False
+    local = min(max(local, 0), int(view.shape[0]) - 1)
+    return _paper_gap_crosses(view, ink, local, page_span) or _rule_crosses(view, paper, local)
+
+
+def _spans(flags: np.ndarray[Any, Any], *, cover: float = 0.72) -> bool:
+    """True when a mark reaches both ends of a line, apart from a short edge margin.
+
+    The margin is an eighth of the line. A rule under a title, or a gutter
+    inside a box that includes a blank border, still counts. A mark that stops
+    in the middle of the line does not.
+    """
+    span = int(flags.shape[0])
+    if span < 8:
+        return False
+    tolerance = max(2, round(span * 0.12))
+    hits = np.flatnonzero(flags)
+    if hits.size == 0:
+        return False
+    if int(hits[0]) > tolerance or int(hits[-1]) < span - 1 - tolerance:
+        return False
+    core = flags[tolerance:-tolerance] if span > 2 * tolerance + 4 else flags
+    if int(core.shape[0]) < 4:
+        return False
+    return float(core.mean()) >= cover
+
+
+def _paper_gap_crosses(
+    view: np.ndarray[Any, Any],
+    ink: np.ndarray[Any, Any],
+    local: int,
+    page_span: int,
+) -> bool:
+    """A band of paper across the view, with drawings on both sides."""
+    span = int(view.shape[0])
+    open_row = ~ink
+    frac = ink.mean(axis=1)
+    # A gutter row is mostly paper and reaches both ends. Inside one box the
+    # line can be a little darker than the page-wide valley test.
+    candidates = [
+        row
+        for row in range(max(0, local - 6), min(span, local + 7))
+        if float(frac[row]) < 0.17 and _spans(open_row[row])
+    ]
+    candidates.sort(key=lambda row: (abs(row - local), row))
+    limit = max(3, round(page_span * 0.07))
+    side = max(4, round(span * 0.025))
+    for origin in candidates:
+        start = origin
+        while start > 0 and float(frac[start - 1]) < 0.17 and _spans(open_row[start - 1]):
+            start -= 1
+        end = origin + 1
+        while end < span and float(frac[end]) < 0.17 and _spans(open_row[end]):
+            end += 1
+        # The page-level cut can sit on the rule beside the gap.
+        if not start - 4 <= local < end + 4:
+            continue
+        thick = end - start
+        if thick < 1 or thick > limit:
+            continue
+        above = ink[max(0, start - side) : start]
+        below = ink[end : min(span, end + side)]
+        if above.size == 0 or below.size == 0:
+            continue
+        # The cut was already a gutter on a wider view. Drawings only have to
+        # sit on both sides inside this box, so a light panel still counts.
+        if float(above.mean()) >= 0.12 and float(below.mean()) >= 0.12:
+            return True
+    return False
+
+
+def _rule_crosses(view: np.ndarray[Any, Any], paper: float, local: int) -> bool:
+    """A thin dark rule, or a ridge, with paper on both sides, across the view."""
+    span = int(view.shape[0])
+    band = 14
+    lo = max(0, local - band)
+    hi = min(span, local + band + 1)
+    ruled = [_row_is_rule(view, paper, row) for row in range(lo, hi)]
+    origin = local - lo
+    near: int | None = None
+    for delta in range(5):
+        for candidate in (origin - delta, origin + delta):
+            if 0 <= candidate < len(ruled) and ruled[candidate]:
+                near = candidate
+                break
+        if near is not None:
+            break
+    if near is None:
+        return False
+    start = near
+    while start > 0 and ruled[start - 1]:
+        start -= 1
+    end = near + 1
+    while end < len(ruled) and ruled[end]:
+        end += 1
+    # A run that reaches the edge of this window continues into a dark field.
+    if (start == 0 and lo > 0) or (end == len(ruled) and hi < span):
+        return False
+    thick = end - start
+    if not 1 <= thick <= 8:
+        return False
+    gap = max(3, round(span * 0.02))
+    return _paper_shoulders(view, paper, 0, lo + start, lo + end, gap)
+
+
+def _row_is_rule(view: np.ndarray[Any, Any], paper: float, row: int) -> bool:
+    line = view[row]
+    # A frame rule is thinner than a paper gutter, so a broken line still counts.
+    if _spans(line < paper - 30.0, cover=0.55):
+        return True
+    height, width = int(view.shape[0]), int(view.shape[1])
+    k = max(2, round(min(height, width) * 0.008))
+    if row - k < 0 or row + k >= height:
+        return False
+    ridge = (view[row - k] - line > 8) & (view[row + k] - line > 8) & (line < paper - 12)
+    return _spans(ridge, cover=0.55)
+
+
 def _apply(
     box: Box,
     cuts: Sequence[int],
@@ -277,6 +429,8 @@ def _apply(
     page_w: int,
     page_h: int,
     dark: np.ndarray[Any, Any],
+    lum: np.ndarray[Any, Any],
+    paper: float,
     scale: float,
 ) -> list[Box]:
     page_span = page_h if axis == "y" else page_w
@@ -289,7 +443,13 @@ def _apply(
     if span < page_span * 0.34 or cross < 0.32:
         return [box]
     inset = max(round(span * 0.14), round(page_span * 0.05))
-    interior = [cut for cut in cuts if start + inset < cut < end - inset]
+    # The candidate was measured on a wider view. Keep it only when the same
+    # kind of gutter runs across this box, so a column rule cannot cut its neighbour.
+    interior = [
+        cut
+        for cut in cuts
+        if start + inset < cut < end - inset and _crosses_box(lum, dark, paper, box, axis, cut, scale)
+    ]
     if not interior:
         return [box]
     edges = [start]
