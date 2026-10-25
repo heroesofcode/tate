@@ -105,6 +105,47 @@ def test_cv_splits_panels_across_a_dark_gutter() -> None:
     assert found.panels[0].y2 < found.panels[1].y or found.panels[1].y2 < found.panels[0].y
 
 
+def test_fuse_keeps_a_splash_when_inset_frames_do_not_tile() -> None:
+    splash = [Box(20, 20, 960, 960, 0.9)]
+    # Clear of every edge of the splash, together a large share of the page,
+    # and neither a partition of the splash nor a tiling of the page.
+    insets = [
+        Box(180, 160, 320, 280, 0.5),
+        Box(520, 160, 320, 280, 0.5),
+        Box(180, 500, 320, 280, 0.5),
+        Box(520, 500, 320, 280, 0.5),
+    ]
+    fused = fuse_panels(splash, insets, 1000, 1000)
+    assert len(fused) == 1
+    assert fused[0].score == 0.9
+    assert fused[0].w > 900
+
+
+def test_fuse_splits_a_huge_box_when_guides_reach_the_frame() -> None:
+    huge = [Box(0, 0, 1000, 1000, 0.4)]
+    guides = [
+        Box(0, 0, 480, 300, 0.5),
+        Box(520, 0, 480, 300, 0.5),
+        Box(0, 700, 480, 250, 0.5),
+    ]
+    fused = fuse_panels(huge, guides, 1000, 1000)
+    assert len(fused) == 3
+    assert all(box.score == 0.5 for box in fused)
+
+
+def test_fuse_replaces_a_huge_box_when_the_guides_tile_the_page() -> None:
+    huge = [Box(0, 0, 1000, 1000, 0.4)]
+    guides = [
+        Box(40, 40, 440, 400, 0.5),
+        Box(520, 40, 440, 400, 0.5),
+        Box(40, 520, 920, 400, 0.5),
+    ]
+    fused = fuse_panels(huge, guides, 1000, 1000)
+    assert len(fused) == 3
+    assert {box.y for box in fused} == {40, 520}
+    assert all(box.score == 0.5 for box in fused)
+
+
 def test_fuse_splits_a_box_across_two_frames() -> None:
     merged = [Box(40, 40, 920, 1400, 0.9)]
     guides = [Box(40, 40, 920, 600, 0.5), Box(40, 720, 920, 720, 0.5)]

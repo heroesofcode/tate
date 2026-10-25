@@ -22,6 +22,9 @@ _TARGET = 1100
 _PAGE_GUIDE = 0.72
 # Two boxes past this overlap are the same region counted twice.
 _OVERLAP_IOU = 0.45
+# Guides this far inside every side of a huge box are drawings on that picture,
+# not the panels that structure the page.
+_INSET_MARGIN = 0.08
 
 
 def background_color(rgb: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
@@ -132,13 +135,15 @@ def fuse_panels(
     if not primary:
         return prepared
     page_area = max(1, page_w * page_h)
-    if (
-        len(primary) == 1
-        and primary[0].area > 0.65 * page_area
-        and len(prepared) >= 3
-        and sum(guide.area for guide in prepared) > 0.35 * page_area
-    ):
-        return prepared
+    # A box around most of the page is not itself a panel. A partition or a
+    # tiling replaces it. So does a set of guides that reaches the frame.
+    # Guides that float inside the box are insets on a splash, and the splash
+    # stays one panel.
+    if len(primary) == 1 and primary[0].area > 0.65 * page_area:
+        covers = len(prepared) >= 3 and sum(guide.area for guide in prepared) > 0.35 * page_area
+        partitioned = _is_partition(primary[0], prepared) or _is_tiling(prepared, page_w, page_h)
+        if partitioned or (covers and not _floats_inside(primary[0], prepared)):
+            return prepared
     used = [False] * len(prepared)
     fused: list[Box] = []
     for box in primary:
@@ -233,6 +238,22 @@ def _is_partition(box: Box, guides: Sequence[Box]) -> bool:
             if contained_ratio(left, right) > 0.55 or contained_ratio(right, left) > 0.55:
                 return False
     return True
+
+
+def _floats_inside(box: Box, guides: Sequence[Box]) -> bool:
+    """True when every guide sits in the interior, clear of the box edges."""
+    if box.w <= 0 or box.h <= 0 or not guides:
+        return False
+    margin_x = box.w * _INSET_MARGIN
+    margin_y = box.h * _INSET_MARGIN
+    inner_x1 = box.x + margin_x
+    inner_y1 = box.y + margin_y
+    inner_x2 = box.x2 - margin_x
+    inner_y2 = box.y2 - margin_y
+    return all(
+        guide.x >= inner_x1 and guide.y >= inner_y1 and guide.x2 <= inner_x2 and guide.y2 <= inner_y2
+        for guide in guides
+    )
 
 
 def _is_tiling(boxes: Sequence[Box], page_w: int, page_h: int) -> bool:
