@@ -21,6 +21,7 @@ from tate.boxes import (
     union_box,
 )
 from tate.detect.cv import recover_uncovered
+from tate.ink import cover_boxes, stroke_coverage
 from tate.order import ReadingDirection, reading_order
 
 MAX_UPSCALE = 1.6
@@ -201,6 +202,10 @@ def layout_page(
             spread=spread,
         )
     expanded = expand_for_text(cleaned, texts, page_w, page_h)
+    # Crops, not the panel boxes, grow to meet so ink outside every frame
+    # (a margin, a caption, a balloon that crosses a border) is still emitted.
+    expanded = cover_boxes(expanded, page_w, page_h)
+    expanded = expand_for_text(expanded, texts, page_w, page_h)
     order = reading_order(cleaned, direction)
     segments: list[SegmentDraft] = []
     used: list[Box] = []
@@ -297,7 +302,10 @@ def _unreliable(panels: Sequence[Box], image: Image.Image) -> bool:
         for right in panels[index + 1 :]:
             if iou(left, right) > OVERLAP_IOU:
                 return True
-    return ink_coverage(image, panels) < INK_COVERAGE_MIN
+    strokes = stroke_coverage(image, panels)
+    if strokes is None:
+        return ink_coverage(image, panels) < INK_COVERAGE_MIN
+    return strokes < INK_COVERAGE_MIN
 
 
 def _segments_for_box(

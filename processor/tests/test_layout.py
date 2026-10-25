@@ -2,6 +2,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from tate.boxes import Box, Detection, clean_panels, drop_slivers, separate_overlaps
 from tate.debug import draw_debug
+from tate.ink import cover_boxes
 from tate.layout import (
     MAX_SEGMENT_HEIGHT,
     assign_gaps,
@@ -133,7 +134,8 @@ def test_a_missed_panel_is_recovered_from_uncovered_ink() -> None:
     )
     assert laid.fallback is False
     assert len(laid.segments) == 2
-    assert any(segment.box.x > 350 for segment in laid.segments)
+    # The crop may take in the gutter; the panel itself stays on the right.
+    assert any(segment.panel.x > 350 and segment.box.x2 > 700 for segment in laid.segments)
 
 
 def test_two_bands_through_one_drawing_stay_one_page() -> None:
@@ -227,3 +229,27 @@ def test_same_page_panels_use_the_smaller_gap() -> None:
     assert len(segments) == 2
     gaps = assign_gaps(segments, 1080)
     assert gaps == [0, gap_sizes(1080)[0]]
+
+
+def test_crops_tile_the_page_so_margin_ink_is_kept() -> None:
+    covered = cover_boxes([Box(40, 30, 80, 90), Box(200, 40, 70, 100)], 320, 240)
+    for x, y in ((0, 0), (319, 0), (0, 239), (319, 239), (160, 120)):
+        assert any(box.x <= x < box.x2 and box.y <= y < box.y2 for box in covered)
+
+    image = Image.new("RGB", (500, 800), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 80, 460, 360), fill=(40, 40, 40))
+    draw.rectangle((40, 440, 460, 740), fill=(55, 55, 55))
+    draw.rectangle((70, 8, 160, 40), fill=(0, 0, 0))
+    laid = layout_page(
+        image,
+        Detection((Box(40, 80, 420, 280), Box(40, 440, 420, 300)), ()),
+        page_index=0,
+        width=400,
+    )
+    assert laid.fallback is False
+    assert len(laid.segments) == 2
+    assert any(
+        segment.box.x <= 70 and segment.box.y <= 8 and segment.box.x2 >= 160 and segment.box.y2 >= 40
+        for segment in laid.segments
+    )
