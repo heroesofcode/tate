@@ -5,7 +5,8 @@ const iphone = devices['iPhone 13'];
 export default defineConfig({
   testDir: 'e2e',
   fullyParallel: false,
-  workers: 1,
+  // Several phone sizes share one preview server.
+  workers: 4,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reporter: [['list'], ['html', { open: 'never' }]],
@@ -31,6 +32,25 @@ export default defineConfig({
         ...iphone,
         browserName: 'chromium',
         defaultBrowserType: 'chromium',
+        locale: 'en-US',
+      },
+    },
+    {
+      name: 'iphone-se',
+      use: {
+        ...devices['iPhone SE'],
+        // The classic SE size, kept explicit so the project stays 320 by 568.
+        viewport: { width: 320, height: 568 },
+        browserName: 'chromium',
+        defaultBrowserType: 'chromium',
+        locale: 'en-US',
+      },
+    },
+    {
+      name: 'landscape',
+      use: {
+        ...devices['Pixel 7 landscape'],
+        browserName: 'chromium',
         locale: 'en-US',
       },
     },
