@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
 import time
 import zipfile
 from dataclasses import dataclass, replace
@@ -217,9 +216,10 @@ def _build_page(page: PageAnn, cache: Path, sources: dict[str, Source]) -> Image
     if isinstance(source.fetch, ZipFetch):
         if not image.member:
             raise TateError(f"page {page.id} needs a zip member")
-        data, name = _read_member(blob, image.member)
         if image.pdf_page is not None:
-            return _render_pdf_bytes(data, image.pdf_page, name)
+            extracted = _extract_pdf_member(blob, image.member, cache / "members" / source.id)
+            return _render_pdf_path(extracted, image.pdf_page, PurePosixPath(image.member).name)
+        data, name = _read_member(blob, image.member)
         return open_image(data, InputLimits(), name)
     if isinstance(source.fetch, ImageFetch) and image.member is not None:
         raise TateError(f"page {page.id} member is only valid for a zip source")
@@ -273,11 +273,42 @@ def _render_pdf_path(path: Path, page_index: int, label: str) -> Image.Image:
         document.close()
 
 
-def _render_pdf_bytes(data: bytes, page_index: int, label: str) -> Image.Image:
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
-        handle.write(data)
-        handle.flush()
-        return _render_pdf_path(Path(handle.name), page_index, label)
+MAX_PDF_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _extract_pdf_member(archive_path: Path, member: str, folder: Path) -> Path:
+    """Copy a PDF out of a verified archive once, so each page renders from disk."""
+    if PurePosixPath(member).suffix.casefold() != ".pdf":
+        raise TateError(f"pdf_page needs a PDF member: {member}")
+    target = folder / PurePosixPath(member).name
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            try:
+                info = archive.getinfo(member)
+            except KeyError as exc:
+                raise TateError(f"zip is missing {member}") from exc
+            if info.flag_bits & 0x1:
+                raise TateError(f"encrypted zip entry: {member}")
+            if info.file_size > MAX_PDF_MEMBER_BYTES:
+                raise TateError(f"zip entry is too large: {member}")
+            if target.is_file() and target.stat().st_size == info.file_size:
+                return target
+            folder.mkdir(parents=True, exist_ok=True)
+            partial = target.with_name(target.name + ".part")
+            try:
+                with archive.open(info, "r") as source, partial.open("wb") as sink:
+                    copied = 0
+                    while chunk := source.read(1024 * 1024):
+                        copied += len(chunk)
+                        if copied > MAX_PDF_MEMBER_BYTES:
+                            raise TateError(f"zip entry is too large: {member}")
+                        sink.write(chunk)
+                partial.replace(target)
+            finally:
+                partial.unlink(missing_ok=True)
+    except zipfile.BadZipFile as exc:
+        raise TateError(f"could not read zip archive: {archive_path.name}") from exc
+    return target
 
 
 def _render_document_page(document: Any, page_index: int, label: str) -> Image.Image:
