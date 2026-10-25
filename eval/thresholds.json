@@ -1,0 +1,14 @@
+{
+  "detector": "yolo",
+  "overall": {
+    "panel_f1_50": 0.95,
+    "order_exact": 0.95,
+    "balloon_cut_rate_max": 0.02,
+    "content_loss_pages_max": 0,
+    "fallback_rate_max": 0.10
+  },
+  "per_style": {
+    "panel_f1_50": 0.90
+  },
+  "min_pages_per_style": 3
+}

@@ -80,6 +80,18 @@ The YOLO weights are **not** part of this repository and are not bundled in the 
 
 tate itself is MIT. Choosing the YOLO detector runs those AGPL-3.0 weights on your machine. The `cv` and `page` detectors do not use them.
 
+## Evaluation
+
+`tate eval` scores the panel strip against a ground-truth dataset. The file format, metrics, and the fetch / run / diff commands are in [eval/README.md](../eval/README.md).
+
+The regression command, once annotated pages are in the dataset, is:
+
+```sh
+tate eval run --subset ci --check eval/thresholds.json --detector yolo
+```
+
+There is no CI job for that command yet.
+
 ## Development
 
 ```sh
