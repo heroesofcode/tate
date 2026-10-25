@@ -54,7 +54,9 @@ strip/0002.webp
   reader draws above the segment in the background color. The gap is small
   between panels of the same page and larger between pages. The first segment
   is `0`.
-- `page` is the 0-based source page index. `box` is the panel rectangle in
+- `page` is the 0-based page index in the source file. When only a range of
+  pages is processed it keeps the source numbering, so it can be greater than
+  or equal to `pageCount`. `box` is the panel rectangle in
   source-page pixels (optional, for debugging). Readers ignore unknown fields.
 - Readers reject `format != "tate"` or `version > 1` with a clear message.
 - WebP segments are at most 4096 px tall. A panel taller than that is split into

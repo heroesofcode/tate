@@ -85,6 +85,16 @@ describe('tate packages', () => {
     expect(chapter.cover.type).toBe('image/webp');
   });
 
+  it('accepts source page numbers from a chapter cut out of a longer file', async () => {
+    const base = manifest();
+    const segments = (base.segments as Array<Record<string, unknown>>).map((segment, index) => ({
+      ...segment,
+      page: 34 + index,
+    }));
+    const chapter = await importPackage(tateFile('range.tate', { segments }));
+    expect(chapter.segments.map((segment) => segment.page)).toEqual([34, 35]);
+  });
+
   it('imports a .zip that is actually a tate package', async () => {
     const chapter = await importPackage(tateFile('renamed.zip'));
     expect(chapter.unprocessed).toBe(false);

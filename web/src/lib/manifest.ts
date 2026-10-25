@@ -24,6 +24,7 @@ export interface TateManifest {
   segments: TateSegment[];
 }
 
+const MAX_SOURCE_PAGE = 100000;
 const DETECTORS = new Set(['yolo', 'cv', 'page']);
 const READINGS = new Set(['rtl', 'ltr']);
 const BACKGROUND = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -92,7 +93,8 @@ export function validateManifest(value: unknown): TateManifest {
     if (segment.file !== file) throw new PackageError('bad_manifest', `segments[${index}].file`);
     if (segment.width !== width) throw new PackageError('bad_manifest', `segments[${index}].width`);
     const height = integer(segment.height, `segments[${index}].height`, 1, MAX_SEGMENT_HEIGHT);
-    const page = integer(segment.page, `segments[${index}].page`, 0, pageCount - 1);
+    // Source page index: with a page range it can exceed pageCount.
+    const page = integer(segment.page, `segments[${index}].page`, 0, MAX_SOURCE_PAGE);
     if (
       typeof segment.gapBefore !== 'number' ||
       !Number.isFinite(segment.gapBefore) ||
