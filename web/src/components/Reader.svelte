@@ -110,7 +110,8 @@
 
   function readPosition(): { segmentIndex: number; offsetFraction: number } {
     const root = scroller;
-    if (!root) return { segmentIndex, offsetFraction };
+    // Once the scroller is removed it reports a zero offset and would wipe the saved place.
+    if (!root || !root.isConnected) return { segmentIndex, offsetFraction };
     const nodes = [...root.querySelectorAll<HTMLElement>('[data-index]')];
     const first = nodes[0];
     if (!first) return { segmentIndex: 0, offsetFraction: 0 };
