@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from tate.errors import TateError
+from tate.eval.cli import register_eval, run_eval
 from tate.pipeline import format_summary, process_chapter
 
 
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     process.add_argument("--pages", help="1-based page range to read, as N or N-M")
     process.add_argument("--quiet", action="store_true", help="only print errors")
+    register_eval(sub)
     return parser
 
 
@@ -48,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "eval":
+            return run_eval(args)
         if args.command != "process":
             parser.error(f"unknown command {args.command}")
         result = process_chapter(
