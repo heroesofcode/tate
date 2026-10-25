@@ -4,6 +4,10 @@ Read manga the way you read webtoons. tate (縦, "vertical") turns a manga chapt
 
 Work in progress.
 
+## Processor
+
+`processor/` builds a `.tate` chapter from a CBZ, a PDF, or a folder of images. Install and usage: [processor/README.md](processor/README.md). The package shared with the reader is specified in [docs/format.md](docs/format.md).
+
 ## License
 
 MIT
