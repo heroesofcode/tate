@@ -21,6 +21,7 @@ from tate.eval.fetch import page_png
 from tate.eval.metrics import STRIP_WIDTH, PageScore, score_page
 from tate.eval.model import Dataset, LoadedPage
 from tate.layout import layout_page
+from tate.order import ReadingDirection
 
 _DETECTORS: dict[str, Detector] = {}
 
@@ -38,6 +39,7 @@ class _Task:
     panels: tuple[tuple[int, int, int, int], ...]
     balloons: tuple[tuple[int, int, int, int], ...]
     ignore: tuple[tuple[int, int, int, int], ...]
+    direction: ReadingDirection
 
 
 def default_jobs() -> int:
@@ -91,6 +93,14 @@ def evaluate(
     return grouped
 
 
+def _direction(value: str) -> ReadingDirection:
+    if value == "rtl":
+        return "rtl"
+    if value == "ltr":
+        return "ltr"
+    raise TateError(f"direction must be rtl or ltr, got {value}")
+
+
 def _task(page: LoadedPage, detector: str, png: str) -> _Task:
     geometry = page.geometry
     return _Task(
@@ -105,6 +115,7 @@ def _task(page: LoadedPage, detector: str, png: str) -> _Task:
         panels=tuple((panel.box.x, panel.box.y, panel.box.w, panel.box.h) for panel in geometry.panels),
         balloons=tuple((box.x, box.y, box.w, box.h) for box in geometry.balloons),
         ignore=tuple((box.x, box.y, box.w, box.h) for box in geometry.ignore),
+        direction=_direction(page.direction),
     )
 
 
@@ -131,7 +142,13 @@ def _run_task(task: _Task) -> PageScore:
     try:
         started = time.perf_counter()
         detection = detector.detect(image)
-        laid = layout_page(image, detection, page_index=0, width=STRIP_WIDTH)
+        laid = layout_page(
+            image,
+            detection,
+            page_index=0,
+            width=STRIP_WIDTH,
+            direction=task.direction,
+        )
         elapsed = time.perf_counter() - started
         return score_page(
             image,

@@ -54,7 +54,7 @@ A work may mix sources. Each page names the source it needs. `sha256` is lowerca
 }
 ```
 
-`direction` is `rtl` or `ltr`. It records the reading direction of the work. Metrics follow the order of the `panels` array, which is the ground-truth reading order.
+`direction` is `rtl` or `ltr`. It records the reading direction of the work. `tate eval run` passes it to `layout_page`, so the predicted strip uses that order. Metrics follow the order of the `panels` array, which is the ground-truth reading order.
 
 The file name is `pages/<work>.json`. `work` matches that stem.
 
@@ -120,7 +120,7 @@ Decoded pages are stored as PNG at `<cache>/pages/<page id>.png`. A later fetch 
 tate eval run [--dataset eval] [--subset all|ci] [--detector yolo,cv] [--out DIR] [--check FILE] [--jobs N] [--cache DIR] [--all-overlays]
 ```
 
-For each selected page and each detector, this runs `detect` and `layout_page` at strip width 1080, the same call `tate process` makes. Time is wall time around those two calls (`time.perf_counter`). `--jobs` is a process pool (default: CPU count, at most 4). Each worker loads its own detector, including the YOLO session.
+For each selected page and each detector, this runs `detect` and `layout_page` at strip width 1080 with that work's `direction`, the same call `tate process --direction` makes. Time is wall time around those two calls (`time.perf_counter`). `--jobs` is a process pool (default: CPU count, at most 4). Each worker loads its own detector, including the YOLO session.
 
 `--out` (default `eval-report`) receives:
 
