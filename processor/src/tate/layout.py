@@ -24,6 +24,7 @@ from tate.boxes import (
 )
 from tate.detect.cv import recover_uncovered
 from tate.detect.frames import background_color
+from tate.detect.rules import adopt_ruled_grid
 from tate.gutters import split_on_gutters
 from tate.ink import cover_boxes, stroke_coverage
 from tate.order import ReadingDirection, reading_order
@@ -230,6 +231,10 @@ def layout_page(
     base = _panels_before_recovery(image, detection.panels)
     spread = _is_spread(page_w, page_h, base)
     cleaned = base if spread else _recover_panels(image, base)
+    # A ruled sheet can name panels the detector merged or skipped. A spread
+    # stays the two pages already judged, so its boxes are not rewritten.
+    if not spread:
+        cleaned = adopt_ruled_grid(image, cleaned)
     ordered = [cleaned[index] for index in reading_order(cleaned, direction)]
     if spread or _cut_splash(image, cleaned) or _unreliable(cleaned, image):
         whole = Box(0, 0, page_w, page_h)
