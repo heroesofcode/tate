@@ -45,11 +45,14 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
     raster = _png()
     raster_path = tmp_path / "page.png"
     raster_path.write_bytes(raster)
+    pdf_path = tmp_path / "page.pdf"
+    Image.new("RGB", (30, 40), (240, 230, 220)).save(pdf_path, format="PDF")
     archive_path = tmp_path / "pages.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("scan.png", raster)
-    pdf_path = tmp_path / "page.pdf"
-    Image.new("RGB", (30, 40), (240, 230, 220)).save(pdf_path, format="PDF")
+    book_path = tmp_path / "book.zip"
+    with zipfile.ZipFile(book_path, "w") as archive:
+        archive.write(pdf_path, "vol/book.pdf")
     import pypdfium2 as pdfium
 
     document = pdfium.PdfDocument(str(pdf_path))
@@ -66,6 +69,7 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
         _source("raster", raster_path.as_uri(), _sha(raster)),
         _source("pack", archive_path.as_uri(), _sha(archive_path.read_bytes()), kind="zip"),
         _source("volume", pdf_path.as_uri(), _sha(pdf_path.read_bytes())),
+        _source("book", book_path.as_uri(), _sha(book_path.read_bytes()), kind="zip"),
     ]
     (dataset_root / "sources.json").write_text(json.dumps(sources) + "\n")
     pages = [
@@ -93,6 +97,16 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
             "id": "from-pdf",
             "styles": ["standard"],
             "image": {"source": "volume", "pdf_page": 0},
+            "size": [pdf_size[0], pdf_size[1]],
+            "panels": [{"box": [0, 0, 2, 2]}],
+            "whole": True,
+            "balloons": [],
+            "ci": True,
+        },
+        {
+            "id": "zipped-pdf",
+            "styles": ["standard"],
+            "image": {"source": "book", "member": "vol/book.pdf", "pdf_page": 0},
             "size": [pdf_size[0], pdf_size[1]],
             "panels": [{"box": [0, 0, 2, 2]}],
             "whole": True,
@@ -135,6 +149,10 @@ def test_fetch_file_zip_pdf_and_derive_is_idempotent(tmp_path: Path, monkeypatch
     pdf_image = Image.open(page_png(cache, "from-pdf"))
     assert pdf_image.size == pdf_size
     pdf_image.close()
+    zipped = Image.open(page_png(cache, "zipped-pdf"))
+    assert zipped.size == pdf_size
+    zipped.close()
+    assert (cache / "members" / "book" / "book.pdf").is_file()
     assert not page_png(cache, "from-zip").exists()
 
     calls.clear()
