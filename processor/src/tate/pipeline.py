@@ -14,6 +14,7 @@ from tate.errors import TateError
 from tate.io.inputs import ChapterInput
 from tate.layout import SegmentDraft, assign_gaps
 from tate.layout import layout_page as lay_out
+from tate.order import ReadingDirection
 from tate.package import (
     Manifest,
     SegmentRecord,
@@ -90,11 +91,14 @@ def process_chapter(
     debug_dir: Path | None = None,
     pages: str | None = None,
     detector: Detector | None = None,
+    direction: ReadingDirection = "rtl",
 ) -> ProcessResult:
     """Process one chapter. Pass `detector` to skip model loading in tests."""
     started = time.perf_counter()
     if width < 64 or width > 8192:
         raise TateError("width must be between 64 and 8192")
+    if direction not in {"rtl", "ltr"}:
+        raise TateError("direction must be rtl or ltr")
     chosen = detector if detector is not None else resolve_detector(detector_name)
     destination = output_path if output_path is not None else default_output(input_path)
     if destination.exists() and destination.is_dir():
@@ -113,7 +117,13 @@ def process_chapter(
         for page in chapter:
             page_count += 1
             detection = chosen.detect(page.image)
-            laid = lay_out(page.image, detection, page_index=page.index, width=width)
+            laid = lay_out(
+                page.image,
+                detection,
+                page_index=page.index,
+                width=width,
+                direction=direction,
+            )
             if debug_dir is not None:
                 overlay = draw_debug(page.image, laid)
                 overlay.save(debug_dir / f"{page.index + 1:04d}.jpg", format="JPEG", quality=90)
@@ -154,6 +164,7 @@ def process_chapter(
         detector=chosen.name,
         page_count=page_count,
         segments=records,
+        reading=direction,
     )
     write_package(destination, manifest, cover, blobs)
     if preview is not None:

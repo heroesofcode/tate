@@ -44,6 +44,8 @@ strip/0002.webp
 
 `box` is `[x, y, w, h]`.
 
+`reading` is `rtl` or `ltr`. Segments are already stored in that order. A reader scrolls the strip from top to bottom and does not reorder them.
+
 ## Rules
 
 - Every segment image is exactly `width` pixels wide. A panel narrower than the

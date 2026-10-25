@@ -10,7 +10,7 @@ import zipfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from PIL import Image
 
@@ -38,7 +38,7 @@ class Manifest(TypedDict):
     title: str
     source: str
     createdAt: str
-    reading: str
+    reading: Literal["rtl", "ltr"]
     width: int
     background: str
     detector: str
@@ -127,6 +127,7 @@ def build_manifest(
     detector: str,
     page_count: int,
     segments: list[SegmentRecord],
+    reading: Literal["rtl", "ltr"] = "rtl",
 ) -> Manifest:
     return {
         "format": "tate",
@@ -134,7 +135,7 @@ def build_manifest(
         "title": title,
         "source": source,
         "createdAt": created_at_iso(),
-        "reading": "rtl",
+        "reading": reading,
         "width": width,
         "background": BACKGROUND_HEX,
         "detector": detector,
