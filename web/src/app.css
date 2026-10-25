@@ -723,6 +723,7 @@ dialog p {
 .banner p,
 .toast p {
   margin: 0;
+  min-width: 0;
 }
 
 .banner button {
@@ -735,13 +736,16 @@ dialog p {
 }
 
 .toast button {
-  width: 36px;
-  height: 36px;
+  width: 1.7em;
+  height: 1.7em;
+  min-width: 36px;
+  min-height: 36px;
   flex: none;
   border-radius: 999px;
   color: var(--ink);
   font-size: 22px;
   line-height: 1;
+  overflow: hidden;
 }
 
 .toast.error {
