@@ -25,7 +25,7 @@ from tate.boxes import (
 from tate.detect.cv import recover_uncovered
 from tate.detect.frames import background_color
 from tate.detect.rules import adopt_ruled_grid
-from tate.gutters import split_on_gutters
+from tate.gutters import absorb_slivers, split_on_gutters
 from tate.ink import cover_boxes, stroke_coverage
 from tate.order import ReadingDirection, reading_order
 
@@ -279,6 +279,7 @@ def _panels_before_recovery(image: Image.Image, panels: Sequence[Box]) -> list[B
     cleaned = clean_panels(panels, page_w, page_h)
     cleaned = drop_slivers(cleaned, page_w, page_h)
     cleaned = split_on_gutters(image, cleaned)
+    cleaned = absorb_slivers(image, cleaned)
     cleaned = clean_panels(cleaned, page_w, page_h)
     cleaned = drop_slivers(cleaned, page_w, page_h)
     return separate_overlaps(cleaned)

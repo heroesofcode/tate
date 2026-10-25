@@ -22,7 +22,7 @@ class CvDetector:
     def detect(self, image: Image.Image) -> Detection:
         gutters = gutter_panels(image)
         frames = frame_panels(image)
-        fused = fuse_panels(gutters, frames, image.width, image.height)
+        fused = fuse_panels(gutters, frames, image.width, image.height, image)
         return Detection(tuple(fused), ())
 
 

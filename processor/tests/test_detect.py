@@ -147,6 +147,31 @@ def test_fuse_replaces_a_huge_box_when_the_guides_tile_the_page() -> None:
     assert all(box.score == 0.5 for box in fused)
 
 
+def test_a_short_line_does_not_split_a_box_that_frames_only_partly_cover() -> None:
+    image = Image.new("RGB", (800, 520), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 770, 490), fill=(200, 200, 200))
+    draw.line((400, 120, 400, 380), fill=(0, 0, 0), width=6)
+    box = Box(30, 30, 740, 460, 0.9)
+    guides = [Box(30, 30, 370, 460, 0.5), Box(400, 30, 370, 460, 0.5)]
+    fused = fuse_panels([box], guides, 800, 520, image)
+    assert len(fused) == 1
+    assert fused[0].score == 0.9
+    image.close()
+
+
+def test_a_paper_gap_still_splits_a_box_the_frames_tile() -> None:
+    image = Image.new("RGB", (800, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 360, 460), fill=(20, 20, 20))
+    draw.rectangle((430, 30, 760, 460), fill=(20, 20, 20))
+    box = Box(30, 30, 730, 430, 0.9)
+    guides = [Box(30, 30, 330, 430, 0.5), Box(430, 30, 330, 430, 0.5)]
+    fused = fuse_panels([box], guides, 800, 500, image)
+    assert len(fused) == 2
+    image.close()
+
+
 def test_fuse_splits_a_box_across_two_frames() -> None:
     merged = [Box(40, 40, 920, 1400, 0.9)]
     guides = [Box(40, 40, 920, 600, 0.5), Box(40, 720, 920, 720, 0.5)]

@@ -1,27 +1,39 @@
 """Split a box that covers several panels along the gutters between them.
 
-A gutter is either a band of paper with drawings on both sides, or a thin dark
-rule whose shoulders are paper. A hairline white gap is not a gutter. A cut
-splits a box only when that gutter crosses the box, edge to edge apart from a
-short tolerance, so a rule through one column does not slice the panel beside
-it. Cuts are searched inside one row at a time, because a vertical rule usually
-stops at the horizontal gutter. Nothing here is tuned to a particular page: a
-cut is kept only when both pieces are large and inky.
+A gutter is a band of paper with drawings on both sides, or a thin dark rule
+whose shoulders are paper. The line has to cross the whole box, edge to edge
+apart from a short tolerance, so a rule through one column does not slice the
+panel beside it. A stroke that stops inside the drawing, a hairline white gap,
+and a cut that would leave a thin sliver are not gutters. Cuts are searched
+inside one row at a time, because a vertical rule usually stops at the
+horizontal gutter. Nothing here is tuned to a particular page: a cut is kept
+only when both pieces are large and inky.
 """
 
 from __future__ import annotations
 
 import itertools
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from tate.boxes import Box
+from tate.boxes import Box, union_box
 
 _LONG_SIDE = 720
+
+
+def page_view(image: Image.Image) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], float]:
+    """RGB, paper mask, and sheet light for ``image``, reused on the same page."""
+    found = image.__dict__.get("_tate_view")
+    if isinstance(found, tuple) and len(found) == 3:
+        return cast(tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], float], found)
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    view = (rgb, paper_mask(rgb), _sheet_light(rgb))
+    image.__dict__["_tate_view"] = view
+    return view
 
 
 def split_on_gutters(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
@@ -29,7 +41,7 @@ def split_on_gutters(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     page_w, page_h = image.size
     if page_w < 8 or page_h < 8 or not panels:
         return [panel.clamp(page_w, page_h) for panel in panels]
-    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    rgb, sheet, light = page_view(image)
     lum, scale = _resize(rgb)
     paper = float(np.percentile(lum, 72))
     dark = _dark(lum, paper)
@@ -39,10 +51,119 @@ def split_on_gutters(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
         box = panel.clamp(page_w, page_h)
         if box.w < 2 or box.h < 2:
             continue
-        for band in _apply(box, y_cuts, "y", page_w, page_h, dark, lum, paper, scale):
+        for band in _apply(box, y_cuts, "y", page_w, page_h, dark, lum, paper, scale, rgb, sheet, light):
             x_cuts = _cuts(dark, lum, paper, scale, page_w, axis=1, limit=band)
-            pieces.extend(_apply(band, x_cuts, "x", page_w, page_h, dark, lum, paper, scale))
+            pieces.extend(
+                _apply(band, x_cuts, "x", page_w, page_h, dark, lum, paper, scale, rgb, sheet, light)
+            )
     return pieces
+
+
+def paper_mask(rgb: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """Pixels that are this page's paper, including a light sheet inside a dark margin."""
+    from tate.detect.frames import background_color
+
+    background = background_color(rgb)
+    distance = np.sqrt(np.square(rgb.astype(np.float32) - background).sum(axis=2))
+    near_margin = distance < 30.0
+    luminance = _luminance(background)
+    if luminance >= 105.0:
+        return np.asarray(near_margin)
+    # The outer scan is dark, so the sheet is the light colour in the gutters.
+    height, width = int(rgb.shape[0]), int(rgb.shape[1])
+    y0, y1 = height // 8, max(height // 8 + 1, height - height // 8)
+    x0, x1 = width // 8, max(width // 8 + 1, width - width // 8)
+    inner = rgb[y0:y1, x0:x1].astype(np.float32).mean(axis=2)
+    bright = inner[inner > 175.0]
+    if bright.size < inner.size * 0.015:
+        return np.asarray(near_margin)
+    sheet = float(np.median(bright))
+    lum = rgb.astype(np.float32).mean(axis=2)
+    return np.asarray(near_margin | (lum >= sheet - 22.0))
+
+
+def full_span_divider(
+    rgb: np.ndarray[Any, Any],
+    sheet: np.ndarray[Any, Any],
+    box: Box,
+    axis: str,
+    cut: int,
+    *,
+    allow_ink_rule: bool = False,
+    page_light: float | None = None,
+) -> bool:
+    """True when a frame rule or a paper gap at ``cut`` crosses all of ``box``.
+
+    ``axis`` ``"x"`` is a vertical line. ``"y"`` is a horizontal line. The line
+    may stop a little short of the box edge. A paper gap, or a thin dark rule
+    with paper on both sides, counts.
+    ``allow_ink_rule`` also accepts a thin dark band that reaches both edges,
+    which is how a coloured panel is framed when the paint goes up to the rule.
+    """
+    height, width = int(rgb.shape[0]), int(rgb.shape[1])
+    x1, y1 = max(0, box.x), max(0, box.y)
+    x2, y2 = min(width, box.x2), min(height, box.y2)
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return False
+    light = _sheet_light(rgb) if page_light is None else page_light
+    search, walk = 48, 56
+    if axis == "x":
+        lo = max(0, cut - search - walk)
+        hi = min(width, cut + search + walk + 1)
+        if hi - lo < 8 or not (lo <= cut < hi):
+            return False
+        view_sheet = sheet[y1:y2, lo:hi]
+        view_lum = rgb[y1:y2, lo:hi].astype(np.float32).mean(axis=2)
+        return _divider_view(view_sheet, view_lum, cut - lo, search, allow_ink_rule, light)
+    lo = max(0, cut - search - walk)
+    hi = min(height, cut + search + walk + 1)
+    if hi - lo < 8 or not (lo <= cut < hi):
+        return False
+    view_sheet = np.transpose(sheet[lo:hi, x1:x2])
+    view_lum = np.transpose(rgb[lo:hi, x1:x2].astype(np.float32).mean(axis=2))
+    return _divider_view(view_sheet, view_lum, cut - lo, search, allow_ink_rule, light)
+
+
+def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
+    """Fold a thin fragment into the neighbouring panel when no gutter divides them.
+
+    A split that leaves a piece much thinner than a panel is rejected. A narrow
+    cell that really is its own panel stays, because a frame or a paper gap
+    crosses the whole edge between it and its neighbour.
+    """
+    page_w, page_h = image.size
+    current = [panel.clamp(page_w, page_h) for panel in panels if panel.w >= 2 and panel.h >= 2]
+    if page_w < 8 or page_h < 8 or len(current) < 2:
+        return current
+    rgb, sheet, light = page_view(image)
+    lum, scale = _resize(rgb)
+    paper = float(np.percentile(lum, 72))
+    dark = _dark(lum, paper)
+    changed = True
+    while changed and len(current) > 1:
+        changed = False
+        order = sorted(range(len(current)), key=lambda index: current[index].area)
+        for index in order:
+            host = _sliver_host(current, index, page_w, page_h)
+            if host is None:
+                continue
+            small, big = current[index], current[host]
+            axis = _thin_axis(small, big, page_w, page_h)
+            if axis is None:
+                continue
+            parent = union_box(big, small)
+            cut = _shared_cut(small, big, axis)
+            divided = _axis_gap(small, big, axis) > 0 and (
+                full_span_divider(rgb, sheet, parent, axis, cut, page_light=light)
+                or _crosses_box(lum, dark, paper, parent, axis, cut, scale)
+            )
+            if divided:
+                continue
+            current[host] = parent
+            del current[index]
+            changed = True
+            break
+    return current
 
 
 def _resize(rgb: np.ndarray[Any, Any]) -> tuple[np.ndarray[Any, Any], float]:
@@ -422,6 +543,239 @@ def _row_is_rule(view: np.ndarray[Any, Any], paper: float, row: int) -> bool:
     return _spans(ridge, cover=0.55)
 
 
+def _luminance(pixel: np.ndarray[Any, Any]) -> float:
+    return float(0.299 * pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2])
+
+
+def _sheet_light(rgb: np.ndarray[Any, Any]) -> float:
+    """The page's light sheet. A tan border does not hide a brighter interior.
+
+    The level is the bright end of the page, not a mid tone. A grey strip
+    between two strokes stays below it and is not a gutter. When the border is
+    already that light colour, the border itself is the sheet.
+    """
+    from tate.detect.frames import background_color
+
+    sample = rgb[::8, ::8]
+    if sample.size == 0:
+        return 180.0
+    bright = float(np.percentile(sample.astype(np.float32).mean(axis=2), 90))
+    border = _luminance(background_color(rgb))
+    if bright >= border + 18.0:
+        return bright
+    return max(bright, border)
+
+
+def _divider_view(
+    sheet: np.ndarray[Any, Any],
+    lum: np.ndarray[Any, Any],
+    local_cut: int,
+    search: int,
+    allow_ink_rule: bool,
+    page_light: float,
+) -> bool:
+    """``sheet`` and ``lum`` are shaped (span, along). ``local_cut`` is an index on along."""
+    span = int(sheet.shape[0])
+    along = int(sheet.shape[1])
+    if span < 8 or along < 3:
+        return False
+    start = max(0, local_cut - search)
+    end = min(along, local_cut + search + 1)
+    window = sheet[:, start:end]
+    if window.size == 0:
+        return False
+    spanning = _span_columns(window)
+    run = _longest_run([bool(flag) for flag in spanning])
+    if run is not None and run[1] - run[0] >= 2 and _ink_both_sides(sheet, start + run[0], start + run[1]):
+        return True
+    if _frame_rule_view(sheet, lum, start, end):
+        return True
+    return allow_ink_rule and _ink_rule_view(lum, start, end)
+
+
+def _span_columns(flags: np.ndarray[Any, Any], coverage: float = 0.72) -> np.ndarray[Any, Any]:
+    """Which columns of ``flags`` (span, along) reach both ends."""
+    span = int(flags.shape[0])
+    along = int(flags.shape[1]) if flags.ndim == 2 else 1
+    if flags.ndim == 1:
+        flags = flags[:, None]
+    if span < 8 or along == 0:
+        return np.zeros(along, dtype=bool)
+    tolerance = max(2, round(span * 0.055))
+    core = flags[tolerance:-tolerance] if span > 2 * tolerance + 4 else flags
+    length = int(core.shape[0])
+    if length < 4:
+        return np.zeros(along, dtype=bool)
+    edge = max(1, round(length * 0.03))
+    covered = core.mean(axis=0) >= coverage
+    ends = np.any(core[:edge], axis=0) & np.any(core[-edge:], axis=0)
+    return np.asarray(covered & ends)
+
+
+def _longest_run(flags: Sequence[bool]) -> tuple[int, int] | None:
+    best: tuple[int, int] | None = None
+    index = 0
+    count = len(flags)
+    while index < count:
+        if not flags[index]:
+            index += 1
+            continue
+        end = index
+        while end < count and flags[end]:
+            end += 1
+        if best is None or end - index > best[1] - best[0]:
+            best = (index, end)
+        index = end
+    return best
+
+
+def _ink_both_sides(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -> bool:
+    """Drawings sit on both sides of a paper run. A blank margin does not count."""
+    along = int(sheet.shape[1])
+
+    def inky(origin: int, direction: int) -> bool:
+        for delta in range(1, 57):
+            column = origin + direction * delta
+            if column < 0 or column >= along:
+                return False
+            if float((~sheet[:, column]).mean()) >= 0.10:
+                return True
+        return False
+
+    return inky(run_start - 1, -1) and inky(run_end, 1)
+
+
+def _frame_rule_view(
+    sheet: np.ndarray[Any, Any],
+    lum: np.ndarray[Any, Any],
+    start: int,
+    end: int,
+) -> bool:
+    """A thin dark rule with paper on both sides, running the length of the view."""
+    if end - start < 3:
+        return False
+    paper_l = _paper_level(lum, sheet)
+    dark = lum < paper_l - 30.0
+    along = int(lum.shape[1])
+    spans = _span_columns(dark)
+    for index in range(start, end):
+        if not bool(spans[index]):
+            continue
+        left_0, left_1 = max(0, index - 12), max(0, index - 1)
+        right_0, right_1 = min(along, index + 2), min(along, index + 13)
+        if left_1 <= left_0 or right_1 <= right_0:
+            continue
+        left_paper = np.any(sheet[:, left_0:left_1], axis=1)
+        right_paper = np.any(sheet[:, right_0:right_1], axis=1)
+        both = dark[:, index] & left_paper & right_paper
+        band_0, band_1 = max(0, index - 8), min(along, index + 9)
+        thick = int(np.count_nonzero(dark[:, band_0:band_1].mean(axis=0) > 0.55))
+        if thick <= 8 and bool(_span_columns(both)[0]):
+            return True
+    return False
+
+
+def _ink_rule_view(lum: np.ndarray[Any, Any], start: int, end: int) -> bool:
+    """A thin dark band that reaches both edges. A solid black field does not.
+
+    Coloured panels are often painted up to the rule, so the shoulders are not
+    paper. The band still has to be thin: a filled shape is wider. A wide dark
+    area beside a real rule does not hide the rule.
+    """
+    flags = _span_columns(lum[:, start:end] < 115.0)
+    index = 0
+    while index < len(flags):
+        if not bool(flags[index]):
+            index += 1
+            continue
+        end_run = index
+        while end_run < len(flags) and bool(flags[end_run]):
+            end_run += 1
+        if 1 <= end_run - index <= 64:
+            return True
+        index = end_run
+    return False
+
+
+def _paper_level(lum: np.ndarray[Any, Any], sheet: np.ndarray[Any, Any]) -> float:
+    bright = lum[sheet] if sheet.shape == lum.shape else lum
+    if bright.size == 0:
+        return float(np.percentile(lum, 70))
+    light = bright[bright > 100.0]
+    sample = light if light.size > 20 else bright
+    return float(np.median(sample))
+
+
+def _sliver_host(boxes: Sequence[Box], index: int, page_w: int, page_h: int) -> int | None:
+    small = boxes[index]
+    best: int | None = None
+    best_key: tuple[int, int] | None = None
+    for other, big in enumerate(boxes):
+        if other == index or big.area < small.area * 2:
+            continue
+        axis = _thin_axis(small, big, page_w, page_h)
+        if axis is None or not _shares_band(small, big, axis):
+            continue
+        gap = _axis_gap(small, big, axis)
+        limit = max(8, round((page_w if axis == "x" else page_h) * 0.06))
+        if gap > limit:
+            continue
+        key = (gap, -big.area)
+        if best_key is None or key < best_key:
+            best = other
+            best_key = key
+    return best
+
+
+def _thin_axis(small: Box, big: Box, page_w: int, page_h: int) -> str | None:
+    """``"x"`` when ``small`` is a vertical sliver. ``"y"`` when it is a flat one."""
+    if small.w < page_w * 0.11 and small.w < big.w * 0.16 and small.h > small.w:
+        return "x"
+    if small.h < page_h * 0.08 and small.h < big.h * 0.16 and small.w > small.h:
+        return "y"
+    return None
+
+
+def _shares_band(small: Box, big: Box, axis: str) -> bool:
+    if axis == "x":
+        overlap = _overlap_span(small.y, small.y2, big.y, big.y2)
+        return overlap > 0.6 * max(1, small.h)
+    overlap = _overlap_span(small.x, small.x2, big.x, big.x2)
+    return overlap > 0.6 * max(1, small.w)
+
+
+def _axis_gap(a: Box, b: Box, axis: str) -> int:
+    if axis == "x":
+        if a.x2 < b.x:
+            return b.x - a.x2
+        if b.x2 < a.x:
+            return a.x - b.x2
+        return 0
+    if a.y2 < b.y:
+        return b.y - a.y2
+    if b.y2 < a.y:
+        return a.y - b.y2
+    return 0
+
+
+def _shared_cut(a: Box, b: Box, axis: str) -> int:
+    if axis == "x":
+        if a.x2 <= b.x:
+            return (a.x2 + b.x) // 2
+        if b.x2 <= a.x:
+            return (b.x2 + a.x) // 2
+        return (max(a.x, b.x) + min(a.x2, b.x2)) // 2
+    if a.y2 <= b.y:
+        return (a.y2 + b.y) // 2
+    if b.y2 <= a.y:
+        return (b.y2 + a.y) // 2
+    return (max(a.y, b.y) + min(a.y2, b.y2)) // 2
+
+
+def _overlap_span(start_a: int, end_a: int, start_b: int, end_b: int) -> int:
+    return max(0, min(end_a, end_b) - max(start_a, start_b))
+
+
 def _apply(
     box: Box,
     cuts: Sequence[int],
@@ -432,6 +786,9 @@ def _apply(
     lum: np.ndarray[Any, Any],
     paper: float,
     scale: float,
+    rgb: np.ndarray[Any, Any],
+    sheet: np.ndarray[Any, Any],
+    page_light: float,
 ) -> list[Box]:
     page_span = page_h if axis == "y" else page_w
     span = box.h if axis == "y" else box.w
@@ -445,10 +802,15 @@ def _apply(
     inset = max(round(span * 0.14), round(page_span * 0.05))
     # The candidate was measured on a wider view. Keep it only when the same
     # kind of gutter runs across this box, so a column rule cannot cut its neighbour.
+    # A full-resolution sheet gap or rule counts too, when the resized view missed it.
     interior = [
         cut
         for cut in cuts
-        if start + inset < cut < end - inset and _crosses_box(lum, dark, paper, box, axis, cut, scale)
+        if start + inset < cut < end - inset
+        and (
+            _crosses_box(lum, dark, paper, box, axis, cut, scale)
+            or full_span_divider(rgb, sheet, box, axis, cut, allow_ink_rule=True, page_light=page_light)
+        )
     ]
     if not interior:
         return [box]
