@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -21,6 +22,7 @@ from tate.boxes import (
     union_box,
 )
 from tate.detect.cv import recover_uncovered
+from tate.detect.frames import background_color
 from tate.gutters import split_on_gutters
 from tate.ink import cover_boxes, stroke_coverage
 from tate.order import ReadingDirection, reading_order
@@ -33,7 +35,8 @@ TEXT_OVERLAP = 0.30
 OVERLAP_IOU = 0.60
 INK_COVERAGE_MIN = 0.68
 STROKE_COVERAGE_MIN = 0.40
-INK_LEVEL = 240
+# A pixel this far from the page background is ink. The sheet itself is not.
+INK_DISTANCE = 28.0
 BACKGROUND_RGB = (255, 255, 255)
 BACKGROUND_HEX = "#ffffff"
 
@@ -153,15 +156,20 @@ def pad_box(box: Box, page_w: int, page_h: int) -> Box:
 
 
 def ink_coverage(image: Image.Image, panels: Sequence[Box]) -> float:
-    """Share of non-paper pixels that fall inside some panel. Sampled for speed."""
+    """Share of non-paper pixels that fall inside some panel. Sampled for speed.
+
+    Paper is the border colour of this page, so a yellowed sheet or a dark
+    margin is not ink left outside the panels.
+    """
     rgb = np.asarray(image.convert("RGB"))
     height, width = int(rgb.shape[0]), int(rgb.shape[1])
     step = max(1, int(max(height, width) / 480))
     sample = rgb[::step, ::step]
     if sample.size == 0:
         return 1.0
-    tone = sample.astype(np.uint16).sum(axis=2) // 3
-    ink = tone < INK_LEVEL
+    background = background_color(sample)
+    distance = np.sqrt(np.square(sample.astype(np.float32) - background).sum(axis=2))
+    ink = distance > INK_DISTANCE
     total = int(np.count_nonzero(ink))
     if total < 40:
         return 1.0
@@ -247,7 +255,10 @@ def _panels_before_recovery(image: Image.Image, panels: Sequence[Box]) -> list[B
 
 def _recover_panels(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     page_w, page_h = image.size
-    recovered = recover_uncovered(image, panels)
+    # A framed page already names its panels. Ink outside the rules is a
+    # caption or a margin; the crops grow to keep it, and it is not a panel
+    # the detector skipped.
+    recovered = [] if _framed(image, panels) else recover_uncovered(image, panels)
     if not recovered:
         return list(panels)
     # A recovered column is a missed region, not a thin edge of a panel
@@ -316,43 +327,39 @@ def _span_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> int:
 
 
 def _paper_between(image: Image.Image, first: Box, second: Box, axis: str) -> bool:
+    """True when a gutter the colour of this page's background separates the boxes.
+
+    The search runs between the two centres, so a pair that overlaps the gutter
+    still counts as split. Pure white is not required: yellowed paper and a
+    dark margin are gutters too.
+    """
     rgb = np.asarray(image.convert("RGB"))
+    background = background_color(rgb)
     if axis == "y":
         if first.y > second.y:
             first, second = second, first
-        if first.y2 <= second.y:
-            y1, y2 = first.y2, second.y
-        else:
-            y1, y2 = second.y, first.y2
-        if y2 - y1 < 4:
-            y1 = max(0, min(first.y2, second.y) - 8)
-            y2 = min(rgb.shape[0], max(first.y2, second.y) + 8)
+        start = first.y + first.h // 2
+        end = second.y + second.h // 2
         x1, x2 = max(first.x, second.x), min(first.x2, second.x2)
-        if y2 <= y1 or x2 - x1 < 8:
+        if end - start < 4 or x2 - x1 < 8:
             return False
-        band = rgb[max(0, y1) : min(rgb.shape[0], y2), max(0, x1) : min(rgb.shape[1], x2)]
+        band = rgb[max(0, start) : min(rgb.shape[0], end), max(0, x1) : min(rgb.shape[1], x2)]
+        along = 1
     else:
         if first.x > second.x:
             first, second = second, first
-        if first.x2 <= second.x:
-            x1, x2 = first.x2, second.x
-        else:
-            x1, x2 = second.x, first.x2
-        if x2 - x1 < 4:
-            x1 = max(0, min(first.x2, second.x) - 8)
-            x2 = min(rgb.shape[1], max(first.x2, second.x) + 8)
+        start = first.x + first.w // 2
+        end = second.x + second.w // 2
         y1, y2 = max(first.y, second.y), min(first.y2, second.y2)
-        if x2 <= x1 or y2 - y1 < 8:
+        if end - start < 4 or y2 - y1 < 8:
             return False
-        band = rgb[max(0, y1) : min(rgb.shape[0], y2), max(0, x1) : min(rgb.shape[1], x2)]
+        band = rgb[max(0, y1) : min(rgb.shape[0], y2), max(0, start) : min(rgb.shape[1], end)]
+        along = 0
     if band.size == 0:
         return False
-    tone = band.astype(np.uint16).sum(axis=2) // 3
-    # A gutter matches the paper tone of this band. Fixed white misses a tan scan.
-    paper = float(np.percentile(tone, 80))
-    if paper < 110:
-        return False
-    return float(np.mean(tone >= paper - 18)) > 0.6
+    distance = np.sqrt(np.square(band.astype(np.float32) - background).sum(axis=2))
+    fraction = (distance < 28.0).mean(axis=along)
+    return bool(np.any(fraction > 0.72))
 
 
 def _unreliable(panels: Sequence[Box], image: Image.Image) -> bool:
@@ -364,11 +371,101 @@ def _unreliable(panels: Sequence[Box], image: Image.Image) -> bool:
                 return True
     strokes = stroke_coverage(image, panels)
     if strokes is None:
-        return ink_coverage(image, panels) < INK_COVERAGE_MIN
-    # Frame rules and colour that bleeds past a correct box are still strokes.
-    # Only a detection that leaves most of the drawing outside is unreliable;
-    # the crops grow afterwards, so the rest of the ink is not dropped.
-    return strokes < STROKE_COVERAGE_MIN
+        covered = ink_coverage(image, panels)
+        enough = covered >= INK_COVERAGE_MIN
+    else:
+        # Frame rules and colour that bleeds past a correct box are still strokes.
+        # Only a detection that leaves most of the drawing outside is unreliable;
+        # the crops grow afterwards, so the rest of the ink is not dropped.
+        enough = strokes >= STROKE_COVERAGE_MIN
+    if enough:
+        return False
+    # Captions and a margin sit outside a ruled panel. That ink is not a miss.
+    return not _framed(image, panels)
+
+
+def _framed(image: Image.Image, panels: Sequence[Box]) -> bool:
+    """True when the boxes sit on frame rules, so the split is the page structure."""
+    if len(panels) < 2:
+        return False
+    rgb = np.asarray(image.convert("RGB"))
+    gray = rgb.astype(np.uint16).sum(axis=2) // 3
+    paper = float(np.percentile(gray, 70))
+    level = paper - 30.0
+    hits = sum(1 for panel in panels if _rule_border(gray, panel, level))
+    if len(panels) == 2:
+        return hits == 2
+    return hits >= len(panels) - 1
+
+
+def _rule_border(gray: np.ndarray[Any, Any], panel: Box, level: float) -> bool:
+    height, width = int(gray.shape[0]), int(gray.shape[1])
+    x1 = min(max(panel.x, 0), width)
+    y1 = min(max(panel.y, 0), height)
+    x2 = min(max(panel.x2, 0), width)
+    y2 = min(max(panel.y2, 0), height)
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return False
+    # The rule sits on the boundary, often just outside the open interior.
+    reach = 8
+    inset = 3
+    sides = (
+        gray[y1:y2, max(0, x1 - reach) : min(width, x1 + inset)],
+        gray[y1:y2, max(0, x2 - inset) : min(width, x2 + reach)],
+        gray[max(0, y1 - reach) : min(height, y1 + inset), x1:x2],
+        gray[max(0, y2 - inset) : min(height, y2 + reach), x1:x2],
+    )
+    edge_x = max(2, int(width * 0.02))
+    edge_y = max(2, int(height * 0.02))
+    on_edge = (
+        panel.x <= edge_x,
+        panel.x2 >= width - edge_x,
+        panel.y <= edge_y,
+        panel.y2 >= height - edge_y,
+    )
+    ruled = 0
+    for side, at_edge in zip(sides, on_edge, strict=True):
+        if at_edge or _edge_is_dark(side, level):
+            ruled += 1
+    return ruled >= 3
+
+
+def _edge_is_dark(side: np.ndarray[Any, Any], level: float) -> bool:
+    if side.size == 0:
+        return False
+    if side.ndim < 2 or min(side.shape) <= 1:
+        return float(np.mean(side < level)) > 0.45
+    thickness = int(np.argmin(side.shape))
+    darkest = side.min(axis=thickness)
+    dark = darkest < level
+    if int(dark.size) < 8:
+        return float(np.mean(dark)) > 0.45
+    # A printed rule is broken by specks. Bridge only a few pixels of gap.
+    closed = _close_gaps(dark, 3)
+    return float(np.mean(dark)) >= 0.20 and float(np.mean(closed)) >= 0.48
+
+
+def _close_gaps(mask: np.ndarray[Any, Any], radius: int) -> np.ndarray[Any, Any]:
+    return _erode_1d(_dilate_1d(mask, radius), radius)
+
+
+def _dilate_1d(mask: np.ndarray[Any, Any], radius: int) -> np.ndarray[Any, Any]:
+    if radius <= 0 or int(mask.size) == 0:
+        return mask
+    values = mask.astype(np.int32)
+    cumulative = np.cumsum(values)
+    index = np.arange(int(mask.size))
+    right = np.minimum(index + radius, int(mask.size) - 1)
+    left = index - radius - 1
+    total = cumulative[right] - np.where(left >= 0, cumulative[np.clip(left, 0, None)], 0)
+    return total > 0
+
+
+def _erode_1d(mask: np.ndarray[Any, Any], radius: int) -> np.ndarray[Any, Any]:
+    if radius <= 0:
+        return mask
+    opened = _dilate_1d(~mask, radius)
+    return ~opened
 
 
 def _segments_for_box(

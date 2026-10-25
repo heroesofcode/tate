@@ -78,11 +78,38 @@ def test_tan_paper_around_real_panels_is_not_a_fallback() -> None:
 
 
 def test_low_ink_coverage_falls_back_to_the_whole_page() -> None:
-    image = Image.new("RGB", (400, 400), "black")
-    segments = _layout(image, (Box(10, 10, 40, 40), Box(300, 300, 40, 40)))
+    image = Image.new("RGB", (400, 400), "white")
+    ImageDraw.Draw(image).rectangle((30, 30, 369, 369), fill=(0, 0, 0))
+    segments = _layout(image, (Box(40, 40, 40, 40), Box(300, 300, 40, 40)))
     assert len(segments) == 1
     assert segments[0].box.w == 400
     assert segments[0].box.h == 400
+
+
+def test_yellow_paper_outside_the_panels_is_not_missed_ink() -> None:
+    paper = (212, 184, 140)
+    image = Image.new("RGB", (400, 800), paper)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 40, 360, 300), fill=(20, 20, 20))
+    draw.rectangle((40, 480, 360, 740), fill=(20, 20, 20))
+    panels = (Box(40, 40, 320, 260), Box(40, 480, 320, 260))
+    laid = layout_page(image, Detection(panels, ()), page_index=0, width=1080)
+    assert laid.fallback is False
+    assert len(laid.segments) == 2
+
+
+def test_a_rule_just_outside_the_box_keeps_the_page() -> None:
+    image = Image.new("RGB", (500, 800), (230, 210, 170))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((18, 30, 240, 760), outline=(0, 0, 0), width=4)
+    draw.rectangle((260, 30, 480, 760), outline=(0, 0, 0), width=4)
+    draw.rectangle((246, 40, 256, 750), fill=(0, 0, 0))
+    draw.rectangle((40, 50, 55, 65), fill=(0, 0, 0))
+    draw.rectangle((280, 50, 295, 65), fill=(0, 0, 0))
+    panels = (Box(28, 40, 200, 710), Box(270, 40, 200, 710))
+    laid = layout_page(image, Detection(panels, ()), page_index=0, width=1080)
+    assert laid.fallback is False
+    assert len(laid.segments) == 2
 
 
 def test_spread_stays_whole_and_scales_to_the_strip() -> None:
@@ -194,6 +221,28 @@ def test_two_bands_through_one_drawing_stay_one_page() -> None:
     segments = _layout(image, (Box(20, 20, 360, 420), Box(20, 380, 360, 400)))
     assert len(segments) == 1
     assert segments[0].box.h == 800
+
+
+def test_captions_outside_a_frame_do_not_drop_the_page() -> None:
+    image = Image.new("RGB", (600, 800), (220, 190, 150))
+    draw = ImageDraw.Draw(image)
+    panels = (Box(30, 40, 220, 720), Box(360, 40, 210, 720))
+    for panel in panels:
+        draw.rectangle((panel.x, panel.y, panel.x2 - 1, panel.y2 - 1), outline=(0, 0, 0), width=5)
+        draw.rectangle((panel.x + 16, panel.y + 16, panel.x + 48, panel.y + 48), fill=(0, 0, 0))
+    draw.rectangle((270, 80, 340, 740), fill=(0, 0, 0))
+    laid = layout_page(image, Detection(panels, ()), page_index=0, width=1080)
+    assert laid.fallback is False
+    assert len(laid.segments) == 2
+
+
+def test_overlapping_boxes_with_a_white_gutter_stay_split() -> None:
+    image = Image.new("RGB", (400, 800), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 20, 380, 340), fill=(30, 30, 30))
+    draw.rectangle((20, 460, 380, 760), fill=(30, 30, 30))
+    segments = _layout(image, (Box(20, 20, 360, 400), Box(20, 380, 360, 400)))
+    assert len(segments) == 2
 
 
 def test_two_panels_with_a_white_gutter_stay_split() -> None:
