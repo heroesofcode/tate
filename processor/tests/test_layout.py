@@ -718,6 +718,74 @@ def test_a_touching_narrow_panel_with_a_light_interior_and_a_rule_stays() -> Non
     image.close()
 
 
+def test_a_touching_narrow_panel_across_a_sheet_light_gutter_stays() -> None:
+    """A tan border does not hide a brighter sheet between two touching panels.
+
+    The boxes meet on the gutter, or overlap there, so there is no measured
+    gap. The blank strip is the interior sheet, walled in by the drawings, and
+    the narrow panel stays its own panel.
+    """
+    border = (190, 140, 90)
+    sheet = (250, 250, 245)
+    wide = Box(40, 36, 560, 624)
+    for shift in (0, 4):
+        narrow = Box(600 - shift, 36, 70, 624)
+        image = Image.new("RGB", (900, 700), border)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((40, 32, 860, 668), fill=sheet)
+        draw.rectangle((wide.x, wide.y, 592, wide.y2), fill=(28, 32, 44))
+        draw.rectangle((608, narrow.y, narrow.x2, narrow.y2), fill=(44, 28, 32))
+        kept = absorb_slivers(image, [wide, narrow])
+        assert len(kept) == 2
+        image.close()
+
+    wide_row = Box(50, 50, 800, 480)
+    for shift in (0, 4):
+        flat = Box(50, 530 - shift, 800, 44)
+        image = Image.new("RGB", (900, 800), border)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((40, 40, 860, 760), fill=sheet)
+        draw.rectangle((wide_row.x, wide_row.y, wide_row.x2, 522), fill=(28, 32, 44))
+        draw.rectangle((flat.x, 538, flat.x2, flat.y2), fill=(44, 28, 32))
+        kept = absorb_slivers(image, [wide_row, flat])
+        assert len(kept) == 2
+        image.close()
+
+
+def test_a_touching_rule_on_a_brighter_sheet_keeps_the_narrow_panel() -> None:
+    """A frame rule keeps a narrow panel when its shoulders are the interior sheet.
+
+    The border is tan, so those shoulders are not the border sample. The boxes
+    meet on the rule, or overlap there.
+    """
+    border = (190, 140, 90)
+    sheet = (250, 250, 245)
+    wide = Box(40, 36, 560, 624)
+    for shift in (0, 4):
+        narrow = Box(600 - shift, 36, 70, 624)
+        image = Image.new("RGB", (900, 700), border)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((40, 32, 860, 668), fill=sheet)
+        for top in range(90, 580, 70):
+            draw.line((80, top, 540, top + 16), fill=(30, 30, 30), width=3)
+            draw.line((630, top + 12, 660, top + 30), fill=(30, 30, 30), width=3)
+        draw.line((600, wide.y, 600, wide.y2), fill=(0, 0, 0), width=4)
+        assert len(absorb_slivers(image, [wide, narrow])) == 2
+        image.close()
+
+    wide_row = Box(50, 50, 800, 480)
+    flat = Box(50, 530, 800, 44)
+    image = Image.new("RGB", (900, 800), border)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 40, 860, 760), fill=sheet)
+    for left in range(80, 800, 90):
+        draw.line((left, 80, left + 16, 460), fill=(30, 30, 30), width=3)
+        draw.line((left + 8, 548, left + 24, 568), fill=(30, 30, 30), width=3)
+    draw.line((wide_row.x, 530, wide_row.x2, 530), fill=(0, 0, 0), width=4)
+    assert len(absorb_slivers(image, [wide_row, flat])) == 2
+    image.close()
+
+
 def test_a_narrow_panel_across_a_paper_gap_is_not_a_sliver() -> None:
     image = Image.new("RGB", (800, 600), "white")
     draw = ImageDraw.Draw(image)

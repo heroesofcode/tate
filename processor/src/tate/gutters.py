@@ -93,19 +93,19 @@ def full_span_divider(
     allow_ink_rule: bool = False,
     page_light: float | None = None,
     search: int = 48,
-    paper_gap: bool = True,
+    apart: bool = True,
 ) -> bool:
     """True when a frame rule or a paper gap at ``cut`` crosses all of ``box``.
 
     ``axis`` ``"x"`` is a vertical line. ``"y"`` is a horizontal line. The line
     may stop a little short of the box edge. A paper gap, a bright sheet that is
     not the border sample, or a thin dark rule with paper on both sides, counts.
-    ``paper_gap`` false skips a paper-coloured run and a bright field, which is
-    how a light panel looks. A blank strip walled in by drawing still counts,
-    and so does a thin dark rule. ``allow_ink_rule`` also accepts a
-    thin dark band that reaches both edges, which is how a coloured panel is
-    framed when the paint goes up to the rule. ``search`` is how far, in page
-    pixels, that mark may sit from ``cut``.
+    ``apart`` is false when the boxes only touch: a paper-coloured field is the
+    panel, and so is a bright field, unless a narrow strip of either is walled
+    in by solid drawing. A thin dark rule still counts. ``allow_ink_rule`` also
+    accepts a thin dark band that reaches both edges, which is how a coloured
+    panel is framed when the paint goes up to the rule. ``search`` is how far,
+    in page pixels, that mark may sit from ``cut``.
     """
     height, width = int(rgb.shape[0]), int(rgb.shape[1])
     x1, y1 = max(0, box.x), max(0, box.y)
@@ -122,14 +122,14 @@ def full_span_divider(
             return False
         view_sheet = sheet[y1:y2, lo:hi]
         view_lum = rgb[y1:y2, lo:hi].astype(np.float32).mean(axis=2)
-        return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light, paper_gap=paper_gap)
+        return _edge_divider(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light, apart=apart)
     lo = max(0, cut - band - walk)
     hi = min(height, cut + band + walk + 1)
     if hi - lo < 8 or not (lo <= cut < hi):
         return False
     view_sheet = np.transpose(sheet[lo:hi, x1:x2])
     view_lum = np.transpose(rgb[lo:hi, x1:x2].astype(np.float32).mean(axis=2))
-    return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light, paper_gap=paper_gap)
+    return _edge_divider(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light, apart=apart)
 
 
 def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
@@ -140,7 +140,8 @@ def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
     edge, or a paper gap sits between boxes that are actually apart. Boxes that
     only touch, or that overlap, have no measured gap. A light interior is
     paper with ink in it, so it does not keep them apart. A dark frame rule
-    does, and so does a blank strip with solid drawing hard against both sides.
+    does, and so does a blank strip with solid drawing hard against both sides,
+    whether that strip is the border paper or a brighter sheet inside it.
     """
     page_w, page_h = image.size
     current = [panel.clamp(page_w, page_h) for panel in panels if panel.w >= 2 and panel.h >= 2]
@@ -574,7 +575,7 @@ def _sheet_light(rgb: np.ndarray[Any, Any]) -> float:
     return max(bright, border)
 
 
-def _divider_view(
+def _edge_divider(
     sheet: np.ndarray[Any, Any],
     lum: np.ndarray[Any, Any],
     local_cut: int,
@@ -582,37 +583,57 @@ def _divider_view(
     allow_ink_rule: bool,
     page_light: float,
     *,
-    paper_gap: bool = True,
+    apart: bool,
 ) -> bool:
-    """``sheet`` and ``lum`` are shaped (span, along). ``local_cut`` is an index on along."""
+    """True when a gutter crosses this band.
+
+    ``sheet`` and ``lum`` are shaped (span, along). ``local_cut`` is an index
+    on along. Separated boxes and boxes that touch share this test. A measured
+    gap accepts a paper run or a bright sheet strip with drawing on both sides.
+    A shared edge accepts that same sheet strip only when solid drawing walls
+    it in, and a border-paper strip on the same terms. A thin dark rule counts
+    either way.
+    """
     span = int(sheet.shape[0])
     along = int(sheet.shape[1])
     if span < 8 or along < 3:
         return False
     start = max(0, local_cut - search)
     end = min(along, local_cut + search + 1)
-    if paper_gap:
-        window = sheet[:, start:end]
-        if window.size == 0:
-            return False
-        spanning = _span_columns(window)
-        run = _longest_run([bool(flag) for flag in spanning])
-        if (
-            run is not None
-            and run[1] - run[0] >= 2
-            and _ink_both_sides(sheet, start + run[0], start + run[1])
-        ):
-            return True
-        if _light_gap_view(lum, start, end, page_light):
-            return True
-    elif _solid_walled_strip(sheet, start, end):
-        # Touching boxes have no measured gap. A blank strip with drawing hard
-        # against both sides is still a gutter. Paper that fills the band is
-        # the panel, even when ink sits nearby.
+    if _blank_strip(sheet, lum, start, end, page_light, apart=apart):
         return True
-    if _frame_rule_view(sheet, lum, start, end):
+    if _frame_rule_view(sheet, lum, start, end, page_light):
         return True
     return allow_ink_rule and _ink_rule_view(lum, start, end)
+
+
+def _blank_strip(
+    sheet: np.ndarray[Any, Any],
+    lum: np.ndarray[Any, Any],
+    start: int,
+    end: int,
+    page_light: float,
+    *,
+    apart: bool,
+) -> bool:
+    """A blank divider. The sheet-light strip is the same test on both paths."""
+    if apart:
+        if _open_paper_run(sheet, start, end):
+            return True
+        return _light_gap_view(lum, start, end, page_light)
+    if _walled_paper_strip(sheet, start, end):
+        return True
+    return _light_gap_view(lum, start, end, page_light, solid=True)
+
+
+def _open_paper_run(sheet: np.ndarray[Any, Any], start: int, end: int) -> bool:
+    """A paper-coloured run with drawing on both sides. The boxes are already apart."""
+    window = sheet[:, start:end]
+    if window.size == 0:
+        return False
+    spanning = _span_columns(window)
+    run = _longest_run([bool(flag) for flag in spanning])
+    return run is not None and run[1] - run[0] >= 2 and _ink_both_sides(sheet, start + run[0], start + run[1])
 
 
 def _span_columns(flags: np.ndarray[Any, Any], coverage: float = 0.72) -> np.ndarray[Any, Any]:
@@ -667,15 +688,10 @@ def _ink_both_sides(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -
     return inky(run_start - 1, -1) and inky(run_end, 1)
 
 
-def _solid_walled_strip(sheet: np.ndarray[Any, Any], start: int, end: int) -> bool:
-    """A blank strip inside the band, with solid drawing against both sides.
-
-    Paper that runs from one side of the band to the other is a light panel.
-    Ink further away, or a few strokes, does not turn that field into a gutter.
-    """
-    if end - start < 5:
-        return False
-    spanning = _span_columns(sheet[:, start:end])
+def _bounded_runs(flags: np.ndarray[Any, Any], coverage: float) -> list[tuple[int, int]]:
+    """Narrow spanning runs that stop inside the window, as half-open indexes."""
+    spanning = _span_columns(flags, coverage)
+    found: list[tuple[int, int]] = []
     index = 0
     count = int(spanning.shape[0])
     while index < count:
@@ -686,20 +702,32 @@ def _solid_walled_strip(sheet: np.ndarray[Any, Any], start: int, end: int) -> bo
         while end_run < count and bool(spanning[end_run]):
             end_run += 1
         width = end_run - index
-        if (
-            2 <= width <= 48
-            and index > 0
-            and end_run < count
-            and _solid_walls(sheet, start + index, start + end_run)
-        ):
-            return True
+        if 2 <= width <= 48 and index > 0 and end_run < count:
+            found.append((index, end_run))
         index = end_run
+    return found
+
+
+def _walled_paper_strip(sheet: np.ndarray[Any, Any], start: int, end: int) -> bool:
+    """A border-paper strip inside the band, with solid drawing against both sides.
+
+    Paper that runs from one side of the band to the other is a light panel.
+    Ink further away, or a few strokes, does not turn that field into a gutter.
+    """
+    if end - start < 5:
+        return False
+    for run_start, run_end in _bounded_runs(sheet[:, start:end], 0.72):
+        if _solid_walls(~sheet, start + run_start, start + run_end):
+            return True
     return False
 
 
-def _solid_walls(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -> bool:
-    """Drawing, not a stroke, sits hard against both sides of the strip."""
-    along = int(sheet.shape[1])
+def _solid_walls(ink: np.ndarray[Any, Any], run_start: int, run_end: int) -> bool:
+    """Drawing, not a stroke, sits hard against both sides of the strip.
+
+    ``ink`` is true on drawing pixels and shaped (span, along).
+    """
+    along = int(ink.shape[1])
 
     def wall(origin: int, direction: int) -> bool:
         columns: list[int] = []
@@ -711,12 +739,19 @@ def _solid_walls(sheet: np.ndarray[Any, Any], run_start: int, run_end: int) -> b
         if len(columns) < 2:
             return False
         left, right = min(columns), max(columns) + 1
-        return float((~sheet[:, left:right]).mean()) >= 0.62
+        return float(ink[:, left:right].mean()) >= 0.62
 
     return wall(run_start - 1, -1) and wall(run_end, 1)
 
 
-def _light_gap_view(lum: np.ndarray[Any, Any], start: int, end: int, page_light: float) -> bool:
+def _light_gap_view(
+    lum: np.ndarray[Any, Any],
+    start: int,
+    end: int,
+    page_light: float,
+    *,
+    solid: bool = False,
+) -> bool:
     """A bright band of the sheet across the whole span, with drawing on both sides.
 
     The band has to be as light as the page's sheet, so a grey strip between two
@@ -724,29 +759,19 @@ def _light_gap_view(lum: np.ndarray[Any, Any], start: int, end: int, page_light:
     border sample. A light panel fills the search window and is not a gutter;
     the band has to be a strip with an edge on both sides. The strip stays
     narrow: a wide light field is the panel, not the gutter, and treating it as
-    one makes a classical page fall back to a single crop.
+    one makes a classical page fall back to a single crop. ``solid`` requires
+    drawing hard against the strip, so scattered ink in a light panel is not a
+    gutter when the boxes only touch.
     """
     if end - start < 5:
         return False
-    thresh = page_light - 12.0
-    flags = _span_columns(lum[:, start:end] > thresh, 0.90)
-    index = 0
-    while index < len(flags):
-        if not bool(flags[index]):
-            index += 1
-            continue
-        end_run = index
-        while end_run < len(flags) and bool(flags[end_run]):
-            end_run += 1
-        width = end_run - index
-        bounded = index > 0 and end_run < len(flags)
-        if (
-            2 <= width <= 48
-            and bounded
-            and _dark_both_sides(lum, start + index, start + end_run, thresh - 28.0)
-        ):
+    level = page_light - 40.0
+    dark = lum < level
+    for run_start, run_end in _bounded_runs(_sheet_bright(lum, page_light)[:, start:end], 0.90):
+        left, right = start + run_start, start + run_end
+        walled = _solid_walls(dark, left, right) if solid else _dark_both_sides(lum, left, right, level)
+        if walled:
             return True
-        index = end_run
     return False
 
 
@@ -766,19 +791,29 @@ def _dark_both_sides(lum: np.ndarray[Any, Any], run_start: int, run_end: int, le
     return inky(run_start - 1, -1) and inky(run_end, 1)
 
 
+def _sheet_bright(lum: np.ndarray[Any, Any], page_light: float) -> np.ndarray[Any, Any]:
+    """Pixels as light as this page's sheet, even when the border is darker."""
+    return np.asarray(lum > page_light - 12.0)
+
+
 def _frame_rule_view(
     sheet: np.ndarray[Any, Any],
     lum: np.ndarray[Any, Any],
     start: int,
     end: int,
+    page_light: float,
 ) -> bool:
-    """A thin dark rule with paper on both sides, running the length of the view."""
+    """A thin dark rule with paper on both sides, running the length of the view.
+
+    A shoulder counts when it is the border paper or the brighter interior sheet.
+    """
     if end - start < 3:
         return False
     paper_l = _paper_level(lum, sheet)
     dark = lum < paper_l - 30.0
     along = int(lum.shape[1])
     spans = _span_columns(dark)
+    bright = _sheet_bright(lum, page_light)
     for index in range(start, end):
         if not bool(spans[index]):
             continue
@@ -786,8 +821,8 @@ def _frame_rule_view(
         right_0, right_1 = min(along, index + 2), min(along, index + 13)
         if left_1 <= left_0 or right_1 <= right_0:
             continue
-        left_paper = np.any(sheet[:, left_0:left_1], axis=1)
-        right_paper = np.any(sheet[:, right_0:right_1], axis=1)
+        left_paper = np.any(sheet[:, left_0:left_1] | bright[:, left_0:left_1], axis=1)
+        right_paper = np.any(sheet[:, right_0:right_1] | bright[:, right_0:right_1], axis=1)
         both = dark[:, index] & left_paper & right_paper
         band_0, band_1 = max(0, index - 8), min(along, index + 9)
         thick = int(np.count_nonzero(dark[:, band_0:band_1].mean(axis=0) > 0.55))
@@ -884,24 +919,28 @@ def _gutter_between(
 
     A positive gap is the gutter already measured between the boxes, so a paper
     gap there still counts. Boxes that touch or overlap have no such gap. A
-    paper-coloured run with ink nearby is the interior of a light panel, not a
+    paper-coloured field with ink nearby is the interior of a light panel, not a
     divider. A thin dark frame rule on the shared edge keeps them apart, and so
-    does a blank strip with solid drawing hard against both sides. The mark is
-    sought in a short band: anything further inside either drawing is not the
-    edge between them.
+    does a blank strip with solid drawing hard against both sides. The blank
+    may be the border paper or a brighter interior sheet. The mark is sought in
+    a short band: anything further inside either drawing is not the edge between
+    them.
     """
     gap = _axis_gap(small, big, axis)
-    if gap > 0:
-        cut = _shared_cut(small, big, axis)
-        return full_span_divider(rgb, sheet, parent, axis, cut, page_light=light) or _crosses_box(
-            lum, dark, paper, parent, axis, cut, scale
-        )
+    apart = gap > 0
     page_span = page_w if axis == "x" else page_h
-    band = max(8, min(24, round(page_span * 0.015)))
-    for cut in _contact_cuts(small, big, axis):
-        if full_span_divider(rgb, sheet, parent, axis, cut, page_light=light, search=band, paper_gap=False):
+    if apart:
+        cuts = [_shared_cut(small, big, axis)]
+        band = 48
+    else:
+        cuts = _contact_cuts(small, big, axis)
+        band = max(8, min(24, round(page_span * 0.015)))
+    for cut in cuts:
+        if full_span_divider(rgb, sheet, parent, axis, cut, page_light=light, search=band, apart=apart):
             return True
-    return False
+    if not apart:
+        return False
+    return _crosses_box(lum, dark, paper, parent, axis, cuts[0], scale)
 
 
 def _contact_cuts(a: Box, b: Box, axis: str) -> list[int]:
