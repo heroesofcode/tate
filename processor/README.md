@@ -75,7 +75,7 @@ Each page is one segment.
 
 The YOLO weights are **not** part of this repository and are not bundled in the wheel. They are downloaded at runtime from a pinned URL and rejected if the sha256 does not match `e66667bc6d5f00013ff27efc15d21e521825369d44dfd5d7f6e43cda2ca512b7`.
 
-- Weights: [leoxs22/manga-panel-detector-yolo26n](https://github.com/leoxs22/manga-panel-detector-yolo26n), trained on Manga109-s, licensed **AGPL-3.0**.
+- Weights: [leoxs22/manga-panel-detector-yolo26n](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n), trained on Manga109-s, licensed **AGPL-3.0**.
 - ONNX export used here: [mednasserallah/manga-panel-detector-yolo26n-onnx](https://huggingface.co/mednasserallah/manga-panel-detector-yolo26n-onnx) at revision `f6b7f3cb2bada1ec7d8b16501f9c984890811445`, file `manga_panel_detector_fp32_1024.onnx`.
 
 tate itself is MIT. Choosing the YOLO detector runs those AGPL-3.0 weights on your machine. The `cv` and `page` detectors do not use them.
