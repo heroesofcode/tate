@@ -92,6 +92,7 @@ def full_span_divider(
     *,
     allow_ink_rule: bool = False,
     page_light: float | None = None,
+    search: int = 48,
 ) -> bool:
     """True when a frame rule or a paper gap at ``cut`` crosses all of ``box``.
 
@@ -100,6 +101,7 @@ def full_span_divider(
     not the border sample, or a thin dark rule with paper on both sides, counts.
     ``allow_ink_rule`` also accepts a thin dark band that reaches both edges,
     which is how a coloured panel is framed when the paint goes up to the rule.
+    ``search`` is how far, in page pixels, that mark may sit from ``cut``.
     """
     height, width = int(rgb.shape[0]), int(rgb.shape[1])
     x1, y1 = max(0, box.x), max(0, box.y)
@@ -107,22 +109,23 @@ def full_span_divider(
     if x2 - x1 < 8 or y2 - y1 < 8:
         return False
     light = _sheet_light(rgb) if page_light is None else page_light
-    search, walk = 48, 56
+    band = max(1, search)
+    walk = 56
     if axis == "x":
-        lo = max(0, cut - search - walk)
-        hi = min(width, cut + search + walk + 1)
+        lo = max(0, cut - band - walk)
+        hi = min(width, cut + band + walk + 1)
         if hi - lo < 8 or not (lo <= cut < hi):
             return False
         view_sheet = sheet[y1:y2, lo:hi]
         view_lum = rgb[y1:y2, lo:hi].astype(np.float32).mean(axis=2)
-        return _divider_view(view_sheet, view_lum, cut - lo, search, allow_ink_rule, light)
-    lo = max(0, cut - search - walk)
-    hi = min(height, cut + search + walk + 1)
+        return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light)
+    lo = max(0, cut - band - walk)
+    hi = min(height, cut + band + walk + 1)
     if hi - lo < 8 or not (lo <= cut < hi):
         return False
     view_sheet = np.transpose(sheet[lo:hi, x1:x2])
     view_lum = np.transpose(rgb[lo:hi, x1:x2].astype(np.float32).mean(axis=2))
-    return _divider_view(view_sheet, view_lum, cut - lo, search, allow_ink_rule, light)
+    return _divider_view(view_sheet, view_lum, cut - lo, band, allow_ink_rule, light)
 
 
 def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
@@ -130,7 +133,9 @@ def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
 
     A split that leaves a piece much thinner than a panel is rejected. A narrow
     cell that really is its own panel stays, because a frame or a paper gap
-    crosses the whole edge between it and its neighbour.
+    crosses the whole edge between it and its neighbour. Boxes that only touch,
+    or that overlap, are held apart the same way: the mark is sought in a short
+    band around that shared edge.
     """
     page_w, page_h = image.size
     current = [panel.clamp(page_w, page_h) for panel in panels if panel.w >= 2 and panel.h >= 2]
@@ -153,12 +158,9 @@ def absorb_slivers(image: Image.Image, panels: Sequence[Box]) -> list[Box]:
             if axis is None:
                 continue
             parent = union_box(big, small)
-            cut = _shared_cut(small, big, axis)
-            divided = _axis_gap(small, big, axis) > 0 and (
-                full_span_divider(rgb, sheet, parent, axis, cut, page_light=light)
-                or _crosses_box(lum, dark, paper, parent, axis, cut, scale)
-            )
-            if divided:
+            if _gutter_between(
+                rgb, sheet, light, lum, dark, paper, scale, parent, small, big, axis, page_w, page_h
+            ):
                 continue
             current[host] = parent
             del current[index]
@@ -795,6 +797,59 @@ def _shares_band(small: Box, big: Box, axis: str) -> bool:
         return overlap > 0.6 * max(1, small.h)
     overlap = _overlap_span(small.x, small.x2, big.x, big.x2)
     return overlap > 0.6 * max(1, small.w)
+
+
+def _gutter_between(
+    rgb: np.ndarray[Any, Any],
+    sheet: np.ndarray[Any, Any],
+    light: float,
+    lum: np.ndarray[Any, Any],
+    dark: np.ndarray[Any, Any],
+    paper: float,
+    scale: float,
+    parent: Box,
+    small: Box,
+    big: Box,
+    axis: str,
+    page_w: int,
+    page_h: int,
+) -> bool:
+    """True when a frame rule or a paper gap divides ``small`` from ``big``.
+
+    A positive gap is the gutter already measured between the boxes. Boxes that
+    touch or overlap have no such gap, so the mark has to sit on the shared
+    edge. Only a short band around that edge is searched: a rule further inside
+    either drawing is not what divides them.
+    """
+    gap = _axis_gap(small, big, axis)
+    if gap > 0:
+        cut = _shared_cut(small, big, axis)
+        return full_span_divider(rgb, sheet, parent, axis, cut, page_light=light) or _crosses_box(
+            lum, dark, paper, parent, axis, cut, scale
+        )
+    page_span = page_w if axis == "x" else page_h
+    band = max(8, min(24, round(page_span * 0.015)))
+    for cut in _contact_cuts(small, big, axis):
+        if full_span_divider(rgb, sheet, parent, axis, cut, page_light=light, search=band):
+            return True
+    return False
+
+
+def _contact_cuts(a: Box, b: Box, axis: str) -> list[int]:
+    """The shared edge, or both lips of the overlap when the boxes cross."""
+    if axis == "x":
+        start_a, end_a, start_b, end_b = a.x, a.x2, b.x, b.x2
+    else:
+        start_a, end_a, start_b, end_b = a.y, a.y2, b.y, b.y2
+    if end_a <= start_b:
+        return [(end_a + start_b) // 2]
+    if end_b <= start_a:
+        return [(end_b + start_a) // 2]
+    left = max(start_a, start_b)
+    right = min(end_a, end_b)
+    if right <= left:
+        return [left]
+    return [left, right]
 
 
 def _axis_gap(a: Box, b: Box, axis: str) -> int:
