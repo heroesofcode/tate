@@ -471,6 +471,7 @@ dialog p {
   place-items: center;
   font-family: var(--serif);
   font-size: 32px;
+  pointer-events: none;
 }
 
 .file-input {

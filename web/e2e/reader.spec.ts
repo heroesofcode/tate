@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { createFixtureTate } from './fixture';
 
 async function dismissHint(page: Page) {
@@ -84,4 +85,34 @@ test('reloads offline after the shell is cached', async ({ page, context }) => {
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByRole('heading', { level: 1, name: 'tate' })).toBeVisible();
+});
+
+test('imports a chapter dropped while the drop hint is shown', async ({ page }) => {
+  const fixture = await createFixtureTate();
+  const bytes = [...(await readFile(fixture))];
+  await page.goto('./');
+  await dismissHint(page);
+  const transfer = await page.evaluateHandle((data) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(data)], 'fixture.tate'));
+    return dt;
+  }, bytes);
+  const library = page.locator('.library');
+  await library.dispatchEvent('dragenter', { dataTransfer: transfer });
+  const hint = page.locator('.drop');
+  await expect(hint).toBeVisible();
+  const box = await hint.boundingBox();
+  if (!box) throw new Error('drop hint has no box');
+  const target = await page.evaluate(
+    ({ x, y }) => {
+      const node = document.elementFromPoint(x, y);
+      if (node?.closest('.drop')) return 'hint';
+      return node?.closest('.library') ? 'library' : 'other';
+    },
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  );
+  expect(target).toBe('library');
+  await library.dispatchEvent('drop', { dataTransfer: transfer });
+  await expect(hint).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Fixture Chapter' })).toBeVisible();
 });
