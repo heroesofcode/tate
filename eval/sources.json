@@ -1,1 +1,142 @@
-[]
+[
+  {
+    "id": "commons-4-frame-comic-strip-about-sewing-mashine-1953",
+    "title": "4-frame comic strip about sewing mashine 1953.jpg",
+    "author": "Unknown (1953)",
+    "license": "Public domain",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3A4-frame_comic_strip_about_sewing_mashine_1953.jpg",
+    "attribution": "Unknown (1953), \"4-frame comic strip about sewing mashine 1953\", via Wikimedia Commons (Public domain)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3A4-frame_comic_strip_about_sewing_mashine_1953.jpg",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/78/4-frame_comic_strip_about_sewing_mashine_1953.jpg",
+      "sha256": "d6cc37dd8474f5deab7d462a57aa7ab224480ae53f38839b0bcc39d243029ad1"
+    }
+  },
+  {
+    "id": "commons-aso-yutaka-yotakun",
+    "title": "麻生豊「陽太君（がっちゃん）原画」より.png",
+    "author": "麻生豊",
+    "license": "CC0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3A%E9%BA%BB%E7%94%9F%E8%B1%8A%E3%80%8C%E9%99%BD%E5%A4%AA%E5%90%9B%EF%BC%88%E3%81%8C%E3%81%A3%E3%81%A1%E3%82%83%E3%82%93%EF%BC%89%E5%8E%9F%E7%94%BB%E3%80%8D%E3%82%88%E3%82%8A.png",
+    "attribution": "麻生豊, \"麻生豊「陽太君（がっちゃん）原画」より\", via Wikimedia Commons (CC0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3A%E9%BA%BB%E7%94%9F%E8%B1%8A%E3%80%8C%E9%99%BD%E5%A4%AA%E5%90%9B%EF%BC%88%E3%81%8C%E3%81%A3%E3%81%A1%E3%82%83%E3%82%93%EF%BC%89%E5%8E%9F%E7%94%BB%E3%80%8D%E3%82%88%E3%82%8A.png",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/83/%E9%BA%BB%E7%94%9F%E8%B1%8A%E3%80%8C%E9%99%BD%E5%A4%AA%E5%90%9B%EF%BC%88%E3%81%8C%E3%81%A3%E3%81%A1%E3%82%83%E3%82%93%EF%BC%89%E5%8E%9F%E7%94%BB%E3%80%8D%E3%82%88%E3%82%8A.png",
+      "sha256": "d17f4e4717b818e019cf9cc135edb3b2f063d1f9c5d696b67ade2eb0fd5da17d"
+    }
+  },
+  {
+    "id": "commons-bajszpil-mangi-4koma",
+    "title": "Bajszpil mangi 4koma.png",
+    "author": "Lukas Arrav",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3ABajszpil_mangi_4koma.png",
+    "attribution": "Lukas Arrav, \"Bajszpil mangi 4koma\", via Wikimedia Commons (CC BY-SA 4.0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3ABajszpil_mangi_4koma.png",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Bajszpil_mangi_4koma.png",
+      "sha256": "9f69adcfc26be8a3c37f972de4030a92e0dbcb99844ecfdd35add99645bc6762"
+    }
+  },
+  {
+    "id": "commons-biwasshi-4koma",
+    "title": "ビワッシー４コママンガ.jpg",
+    "author": "松井高",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3A%E3%83%93%E3%83%AF%E3%83%83%E3%82%B7%E3%83%BC%EF%BC%94%E3%82%B3%E3%83%9E%E3%83%9E%E3%83%B3%E3%82%AC.jpg",
+    "attribution": "松井高, \"ビワッシー４コママンガ\", via Wikimedia Commons (CC BY-SA 4.0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3A%E3%83%93%E3%83%AF%E3%83%83%E3%82%B7%E3%83%BC%EF%BC%94%E3%82%B3%E3%83%9E%E3%83%9E%E3%83%B3%E3%82%AC.jpg",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/45/%E3%83%93%E3%83%AF%E3%83%83%E3%82%B7%E3%83%BC%EF%BC%94%E3%82%B3%E3%83%9E%E3%83%9E%E3%83%B3%E3%82%AC.jpg",
+      "sha256": "445376d24cc1d3a3f1971a90e158fd1b98da415377b73f63291c71237cf0dbb4"
+    }
+  },
+  {
+    "id": "commons-conveyor-belt-sushi",
+    "title": "迴轉壽司 Conveyor Belt Sushi.png",
+    "author": "Scgigi.chang",
+    "license": "CC BY-SA 3.0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3A%E8%BF%B4%E8%BD%89%E5%A3%BD%E5%8F%B8_Conveyor_Belt_Sushi.png",
+    "attribution": "Scgigi.chang, \"迴轉壽司 Conveyor Belt Sushi\", via Wikimedia Commons (CC BY-SA 3.0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3A%E8%BF%B4%E8%BD%89%E5%A3%BD%E5%8F%B8_Conveyor_Belt_Sushi.png",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/b7/%E8%BF%B4%E8%BD%89%E5%A3%BD%E5%8F%B8_Conveyor_Belt_Sushi.png",
+      "sha256": "59c0fa4bbdc1f3c6f50c6aa795e4f289f605035b9cdcf10d61aa41b50d2461d3"
+    }
+  },
+  {
+    "id": "commons-mutt-and-jeff-cartoons-book-6",
+    "title": "Mutt and Jeff cartoons Book 6.pdf",
+    "author": "Bud Fisher (1919)",
+    "license": "Public domain",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3AMutt_and_Jeff_cartoons_Book_6.pdf",
+    "attribution": "Bud Fisher (1919), \"Mutt and Jeff cartoons Book 6\", via Wikimedia Commons (Public domain)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3AMutt_and_Jeff_cartoons_Book_6.pdf",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/9/9b/Mutt_and_Jeff_cartoons_Book_6.pdf",
+      "sha256": "9ba8026730d6c2cbe30a0123ee9dac31aa0c67fa9fc323df4e8f4fbec048ab5a"
+    }
+  },
+  {
+    "id": "commons-ocha03e",
+    "title": "Ocha03e.png",
+    "author": "基建吉(MOTOI Kenkichi)",
+    "license": "CC BY 2.5",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3AOcha03e.png",
+    "attribution": "基建吉(MOTOI Kenkichi), \"Ocha03e\", via Wikimedia Commons (CC BY 2.5)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3AOcha03e.png",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/81/Ocha03e.png",
+      "sha256": "3afd24b551240a2378fb6bae6d23a221a0f98d7b17b2f8df7b8b6736ce2b1ac2"
+    }
+  },
+  {
+    "id": "commons-rkcp451",
+    "title": "Rkcp451.png",
+    "author": "MOTOI Kenkichi",
+    "license": "CC0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3ARkcp451.png",
+    "attribution": "MOTOI Kenkichi, \"Rkcp451\", via Wikimedia Commons (CC0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3ARkcp451.png",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/21/Rkcp451.png",
+      "sha256": "09b6a6d963471ee2a545ef8b7860bca55e9bc8c8c0b6783424f4f395c840d0dc"
+    }
+  },
+  {
+    "id": "commons-wikimedia-comicstrip-sorcerers-apprentice",
+    "title": "Wikimedia comicstrip Sorcerers Apprentice.jpg",
+    "author": "Don-kun",
+    "license": "CC BY-SA 3.0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3AWikimedia_comicstrip_Sorcerers_Apprentice.jpg",
+    "attribution": "Don-kun, \"Wikimedia comicstrip Sorcerers Apprentice\", via Wikimedia Commons (CC BY-SA 3.0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3AWikimedia_comicstrip_Sorcerers_Apprentice.jpg",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/20/Wikimedia_comicstrip_Sorcerers_Apprentice.jpg",
+      "sha256": "b23042cffa4c6c13b62662f011e8e7c854411d9d6eb9954f482fa9d0e1237879"
+    }
+  },
+  {
+    "id": "commons-yonkoma-olfi",
+    "title": "Yonkoma-olfi.jpg",
+    "author": "OLFi77",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://commons.wikimedia.org/wiki/File%3AYonkoma-olfi.jpg",
+    "attribution": "OLFi77, \"Yonkoma-olfi\", via Wikimedia Commons (CC BY-SA 4.0)",
+    "homepage": "https://commons.wikimedia.org/wiki/File%3AYonkoma-olfi.jpg",
+    "fetch": {
+      "kind": "image",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Yonkoma-olfi.jpg",
+      "sha256": "540fd5f0974cd76bb920414e66a9f85d109111728c2914f9ddd8dc75a7667c7a"
+    }
+  }
+]

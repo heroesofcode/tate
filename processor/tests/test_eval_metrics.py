@@ -1,4 +1,4 @@
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from tate.boxes import Box
 from tate.eval.metrics import (
@@ -187,3 +187,14 @@ def test_f1_is_zero_on_a_complete_miss_and_one_when_empty() -> None:
     assert Counts(0, 0, 4).f1 == 0.0
     assert Counts(0, 0, 0).f1 == 1.0
     assert Counts(2, 0, 0).f1 == 1.0
+
+
+def test_content_loss_treats_a_dark_page_background_as_paper() -> None:
+    image = Image.new("RGB", (100, 100), (40, 40, 40))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 20, 79, 79), fill=(255, 255, 255))
+    draw.rectangle((40, 40, 59, 59), fill=(0, 0, 0))
+    panel = (Box(20, 20, 60, 60),)
+    assert content_loss(image, color=False, ignore=(), crops=panel) == 0
+    assert content_loss(image, color=True, ignore=(), crops=panel) == 0
+    assert content_loss(image, color=False, ignore=(), crops=()) == 1
