@@ -71,6 +71,29 @@ def test_package_matches_the_contract(tmp_path: Path, monkeypatch: object) -> No
         assert preview_image.size[0] == 480
 
 
+def test_direction_ltr_is_stored_and_read_left_to_right(tmp_path: Path, monkeypatch: object) -> None:
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")  # type: ignore[attr-defined]
+    path = tmp_path / "page.jpg"
+    save_jpeg(path, grid_page())
+    debug = tmp_path / "debug"
+    result = process_chapter(
+        path,
+        tmp_path / "page.tate",
+        width=1080,
+        detector_name="cv",
+        debug_dir=debug,
+        direction="ltr",
+    )
+    assert result.manifest["reading"] == "ltr"
+    segments = result.manifest["segments"]
+    assert len(segments) == 4
+    centers = [(box[0] + box[2] / 2, box[1] + box[3] / 2) for box in (item["box"] for item in segments)]
+    assert centers[0][0] < centers[1][0]
+    assert centers[0][1] < centers[2][1]
+    assert centers[2][0] < centers[3][0]
+    assert (debug / "0001.jpg").is_file()
+
+
 def test_cv_grid_is_read_right_to_left(tmp_path: Path, monkeypatch: object) -> None:
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")  # type: ignore[attr-defined]
     path = tmp_path / "page.jpg"

@@ -33,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="panel detector (default: auto)",
     )
+    process.add_argument(
+        "--direction",
+        choices=("rtl", "ltr"),
+        default="rtl",
+        help="reading order: rtl (default, right to left) or ltr (left to right)",
+    )
     process.add_argument("--preview", type=Path, metavar="PNG", help="also write a 480px-wide preview PNG")
     process.add_argument(
         "--debug",
@@ -63,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             preview=args.preview,
             debug_dir=args.debug,
             pages=args.pages,
+            direction=args.direction,
         )
     except TateError as exc:
         print(f"error: {exc}", file=sys.stderr)

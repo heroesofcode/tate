@@ -1,6 +1,6 @@
 # tate
 
-Read manga the way you read webtoons. tate (縦, "vertical") turns a manga chapter into one vertical strip of panels, in Japanese reading order, sized for a phone screen, and reads it in an installable web app that works offline.
+Read manga the way you read webtoons. tate (縦, "vertical") turns a chapter into one vertical strip of panels, in reading order, sized for a phone screen, and reads it in an installable web app that works offline.
 
 <p align="center">
   <img src="docs/screenshots/library.webp" width="260" alt="Library with an imported chapter">
@@ -12,7 +12,7 @@ Read manga the way you read webtoons. tate (縦, "vertical") turns a manga chapt
 
 It has two parts:
 
-- **Processor** ([`processor/`](processor/README.md)): a command-line tool for a normal PC, CPU only. It reads a CBZ/ZIP, a PDF, a folder of images, or one image. It detects panels and speech balloons, orders panels right to left and top to bottom, never cuts through a balloon, keeps spreads and wide panels whole, and writes a `.tate` file.
+- **Processor** ([`processor/`](processor/README.md)): a command-line tool for a normal PC, CPU only. It reads a CBZ/ZIP, a PDF, a folder of images, or one image. It detects panels and speech balloons, orders panels right to left and top to bottom (`--direction ltr` reads left to right), never cuts through a balloon, keeps spreads and wide panels whole, and writes a `.tate` file.
 - **Reader** ([`web/`](web/README.md)): a mobile-first web app at <https://heroesofcode.github.io/tate/>. It keeps a library on the device (IndexedDB), works offline once loaded, remembers where you stopped in each chapter, and only keeps nearby panels decoded so long chapters scroll smoothly.
 
 The file shared between them is specified in [docs/format.md](docs/format.md).
