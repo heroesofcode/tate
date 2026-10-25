@@ -7,8 +7,9 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from tate.boxes import contained_ratio
+from tate.boxes import Box, contained_ratio
 from tate.detect.cv import CvDetector
+from tate.detect.frames import frame_panels, fuse_panels, merge_panel_guides
 from tate.detect.model import MODEL_SHA256, MODEL_URL, write_verified
 from tate.detect.yolo import PANEL_CONF, YoloDetector
 from tate.errors import TateError
@@ -80,6 +81,127 @@ def test_cv_finds_four_panels_and_a_bleed_panel() -> None:
     found = CvDetector().detect(image)
     bleed = next(box for box in found.panels if box.x2 > 700)
     assert contained_ratio(type(bleed)(430, 0, 360, 900), bleed) > 0.8 or bleed.w > 300
+
+
+def test_cv_finds_frames_on_yellowed_paper() -> None:
+    paper = (212, 184, 140)
+    image = Image.new("RGB", (900, 1200), paper)
+    draw = ImageDraw.Draw(image)
+    # Fill matches the sheet, so only the rules separate the panels.
+    panels = ((40, 40, 420, 560), (480, 40, 860, 560), (40, 640, 420, 1160), (480, 640, 860, 1160))
+    for box in panels:
+        draw.rectangle(box, fill=paper, outline=(15, 15, 15), width=8)
+    found = CvDetector().detect(image)
+    assert len(found.panels) == 4
+
+
+def test_cv_splits_panels_across_a_dark_gutter() -> None:
+    image = Image.new("RGB", (800, 1000), (28, 28, 32))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 40, 760, 450), fill=(70, 110, 160))
+    draw.rectangle((40, 530, 760, 960), fill=(170, 130, 80))
+    found = CvDetector().detect(image)
+    assert len(found.panels) == 2
+    assert found.panels[0].y2 < found.panels[1].y or found.panels[1].y2 < found.panels[0].y
+
+
+def test_fuse_splits_a_box_across_two_frames() -> None:
+    merged = [Box(40, 40, 920, 1400, 0.9)]
+    guides = [Box(40, 40, 920, 600, 0.5), Box(40, 720, 920, 720, 0.5)]
+    fused = fuse_panels(merged, guides, 1000, 1500)
+    assert len(fused) == 2
+    assert {box.y for box in fused} == {40, 720}
+
+
+def test_fuse_keeps_a_model_box_a_single_guide_only_overlaps() -> None:
+    model = [Box(10, 10, 400, 500, 0.9), Box(10, 600, 400, 500, 0.9)]
+    guides = [Box(12, 12, 390, 490, 0.5), Box(12, 602, 390, 490, 0.5)]
+    fused = fuse_panels(model, guides, 500, 1200)
+    assert len(fused) == 2
+    assert all(box.score == 0.9 for box in fused)
+
+
+def test_fuse_keeps_a_box_when_inner_frames_do_not_tile_it() -> None:
+    model = [Box(100, 100, 400, 500, 0.9)]
+    guides = [Box(140, 140, 120, 80, 0.5), Box(180, 300, 100, 90, 0.5)]
+    fused = fuse_panels(model, guides, 800, 1000)
+    assert len(fused) == 1
+    assert fused[0].score == 0.9
+
+
+def test_fuse_emits_a_shared_partition_once() -> None:
+    first = Box(0, 0, 500, 400, 0.8)
+    second = Box(20, 10, 500, 400, 0.7)
+    guides = [Box(0, 0, 240, 400, 0.5), Box(260, 0, 240, 400, 0.5)]
+    fused = fuse_panels([first, second], guides, 600, 500)
+    assert len(fused) == 2
+    assert {box.x for box in fused} == {0, 260}
+
+
+def test_fuse_ignores_a_guide_that_covers_the_page() -> None:
+    model = [Box(10, 10, 200, 200, 0.9), Box(10, 300, 200, 200, 0.9)]
+    guides = [Box(0, 0, 480, 580, 0.5)]
+    fused = fuse_panels(model, guides, 500, 600)
+    assert len(fused) == 2
+    assert all(box.score == 0.9 for box in fused)
+
+
+def test_aligned_frames_replace_a_broken_detection() -> None:
+    primary = [Box(20, 20, 760, 900, 0.4)]
+    frames = [
+        Box(20, 20, 360, 400, 0.5),
+        Box(400, 20, 380, 400, 0.5),
+        Box(20, 460, 360, 420, 0.5),
+        Box(400, 460, 380, 420, 0.5),
+    ]
+    fused = merge_panel_guides(primary, frames, [], 800, 1000)
+    assert len(fused) == 4
+    assert {box.y for box in fused} == {20, 460}
+
+
+def test_aligned_frames_keep_a_healthy_detection() -> None:
+    primary = [
+        Box(20, 20, 360, 400, 0.9),
+        Box(400, 20, 380, 400, 0.9),
+        Box(20, 460, 360, 420, 0.9),
+        Box(400, 460, 380, 420, 0.9),
+    ]
+    frames = [
+        Box(30, 40, 200, 180, 0.5),
+        Box(430, 40, 200, 180, 0.5),
+        Box(30, 500, 200, 180, 0.5),
+        Box(430, 500, 200, 180, 0.5),
+    ]
+    fused = merge_panel_guides(primary, frames, [], 800, 1000)
+    assert len(fused) == 4
+    assert all(box.score == 0.9 for box in fused)
+
+
+def test_overlapping_boxes_give_way_to_a_gutter_tiling() -> None:
+    primary = [Box(40, 30, 700, 400, 0.8), Box(80, 40, 700, 400, 0.6), Box(40, 500, 760, 400, 0.9)]
+    gutters = [Box(40, 20, 760, 420, 0.5), Box(40, 500, 760, 420, 0.5)]
+    fused = merge_panel_guides(primary, [], gutters, 840, 960)
+    assert len(fused) == 2
+    assert all(box.score == 0.5 for box in fused)
+
+
+def test_fuse_adds_a_frame_the_model_missed() -> None:
+    model = [Box(10, 10, 400, 400, 0.8)]
+    guides = [Box(10, 10, 400, 400, 0.5), Box(10, 500, 400, 400, 0.5)]
+    fused = fuse_panels(model, guides, 500, 1000)
+    assert len(fused) == 2
+    assert any(box.y >= 500 for box in fused)
+
+
+def test_frame_panels_follow_rules_and_ignore_a_blank_page() -> None:
+    blank = Image.new("RGB", (400, 600), "white")
+    assert frame_panels(blank) == []
+    image = Image.new("RGB", (600, 800), (230, 210, 170))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 30, 570, 370), outline=(0, 0, 0), width=6)
+    draw.rectangle((30, 420, 570, 770), outline=(0, 0, 0), width=6)
+    found = frame_panels(image)
+    assert len(found) == 2
 
 
 def test_auto_falls_back_when_the_model_is_missing(
