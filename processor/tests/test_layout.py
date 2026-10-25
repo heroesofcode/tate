@@ -77,6 +77,46 @@ def test_tan_paper_around_real_panels_is_not_a_fallback() -> None:
     assert len(laid.segments) == 2
 
 
+def _ink_along_the_inset(draw: ImageDraw.ImageDraw, panel: Box) -> None:
+    """Dark pixels just inside the box, staggered so they are not a straight rule."""
+    for y in range(panel.y, panel.y2):
+        column = (y // 36) % 3
+        draw.point((panel.x + column, y), fill=(0, 0, 0))
+        draw.point((panel.x2 - 1 - column, y), fill=(0, 0, 0))
+    for x in range(panel.x, panel.x2):
+        row = (x // 36) % 3
+        draw.point((x, panel.y + row), fill=(0, 0, 0))
+        draw.point((x, panel.y2 - 1 - row), fill=(0, 0, 0))
+
+
+def test_dark_art_inside_the_border_does_not_hide_a_missed_panel() -> None:
+    image = Image.new("RGB", (900, 1000), "white")
+    draw = ImageDraw.Draw(image)
+    panels = (Box(40, 40, 240, 860), Box(320, 40, 240, 860))
+    for panel in panels:
+        _ink_along_the_inset(draw, panel)
+        draw.rectangle((panel.x + 36, panel.y + 36, panel.x + 140, panel.y + 200), fill=(10, 10, 10))
+    draw.rectangle((640, 80, 860, 900), fill=(30, 30, 30))
+    laid = layout_page(image, Detection(panels, ()), page_index=0, width=1080)
+    assert laid.fallback is False
+    assert len(laid.segments) == 3
+    assert any(segment.panel.x > 500 for segment in laid.segments)
+
+
+def test_dark_art_inside_the_border_still_falls_back_when_ink_is_missed() -> None:
+    image = Image.new("RGB", (500, 700), "white")
+    draw = ImageDraw.Draw(image)
+    # Larger than a panel, so recovery cannot adopt it, and outside both boxes.
+    draw.rectangle((20, 20, 480, 490), fill=(0, 0, 0))
+    panels = (Box(30, 530, 180, 150), Box(280, 530, 180, 150))
+    for panel in panels:
+        _ink_along_the_inset(draw, panel)
+    laid = layout_page(image, Detection(panels, ()), page_index=0, width=1080)
+    assert laid.fallback is True
+    assert len(laid.segments) == 1
+    assert (laid.segments[0].box.w, laid.segments[0].box.h) == (500, 700)
+
+
 def test_low_ink_coverage_falls_back_to_the_whole_page() -> None:
     image = Image.new("RGB", (400, 400), "white")
     ImageDraw.Draw(image).rectangle((30, 30, 369, 369), fill=(0, 0, 0))
