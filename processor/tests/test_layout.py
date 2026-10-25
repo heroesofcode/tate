@@ -30,6 +30,9 @@ def test_balloon_that_crosses_a_border_is_kept_whole() -> None:
     left = min(segments, key=lambda segment: segment.box.x)
     assert left.box.x <= 180
     assert left.box.x2 >= 280
+    # The crop grows to keep the balloon; the panel box stays the detector box.
+    assert (left.panel.x, left.panel.y, left.panel.w, left.panel.h) == (20, 20, 200, 300)
+    assert left.panel.x2 < left.box.x2
 
 
 def test_orphan_text_attaches_to_the_nearest_panel() -> None:
@@ -89,6 +92,9 @@ def test_narrow_page_is_upscaled_at_most_1_6_and_centered() -> None:
     assert segments[0].box.y == 0
     assert segments[1].box.y == segments[0].box.y2
     assert segments[-1].box.y2 == 3000
+    assert segments[0].panel == segments[1].panel == Box(0, 0, 100, 3000)
+    laid = layout_page(image, Detection((), ()), page_index=0, width=1080)
+    assert laid.emitted_panels() == [Box(0, 0, 100, 3000)]
 
 
 def test_nested_duplicate_is_removed() -> None:
