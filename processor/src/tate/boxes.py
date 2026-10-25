@@ -178,7 +178,8 @@ def _is_sliver(small: Box, large: Box, page_w: int, page_h: int) -> bool:
     short = small.h < page_h * 0.055 and small.h < large.h * 0.4
     if short and x_overlap > 0.6 and y_gap < page_h * 0.025:
         return True
-    narrow = small.w < page_w * 0.08 and small.w < large.w * 0.4
+    # A narrow cell that spans the row is a panel. A sliver is also short.
+    narrow = small.w < page_w * 0.08 and small.w < large.w * 0.4 and small.h < large.h * 0.55
     return narrow and y_overlap > 0.6 and x_gap < page_w * 0.025
 
 
