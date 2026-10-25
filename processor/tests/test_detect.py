@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 from tate.boxes import Box, contained_ratio
 from tate.detect.cv import CvDetector
 from tate.detect.frames import frame_panels, fuse_panels, merge_panel_guides
+from tate.detect.fuse import fuse_detections
 from tate.detect.model import MODEL_SHA256, MODEL_URL, write_verified
 from tate.detect.yolo import PANEL_CONF, YoloDetector
 from tate.errors import TateError
@@ -232,6 +233,83 @@ def test_fuse_adds_a_frame_the_model_missed() -> None:
     fused = fuse_panels(model, guides, 500, 1000)
     assert len(fused) == 2
     assert any(box.y >= 500 for box in fused)
+
+
+def test_fusion_restores_a_confident_box_cut_across_a_wide_hole() -> None:
+    image = Image.new("RGB", (400, 400), (40, 80, 140))
+    model = [Box(10, 10, 380, 380, 0.92)]
+    frames = [Box(20, 20, 150, 360, 0.5), Box(230, 20, 150, 360, 0.5)]
+    fused = fuse_detections(image, model, frames, [])
+    assert len(fused) == 1
+    assert fused[0].score == 0.92
+    assert fused[0].w > 300
+
+
+def test_fusion_splits_a_low_score_box_on_a_gutter() -> None:
+    image = Image.new("RGB", (400, 400), "white")
+    model = [Box(20, 20, 360, 360, 0.3)]
+    frames = [Box(20, 20, 360, 160, 0.5), Box(20, 220, 360, 160, 0.5)]
+    fused = fuse_detections(image, model, frames, [])
+    assert len(fused) == 2
+    assert {box.y for box in fused} == {20, 220}
+
+
+def test_fusion_adds_a_gutter_panel_the_model_missed() -> None:
+    image = Image.new("RGB", (400, 400), "white")
+    model = [Box(20, 20, 360, 150, 0.9)]
+    gutters = [Box(20, 20, 360, 150, 0.5), Box(20, 210, 360, 160, 0.5)]
+    fused = fuse_detections(image, model, [], gutters)
+    assert len(fused) == 2
+    assert any(box.y >= 200 for box in fused)
+
+
+def test_fusion_keeps_model_boxes_when_there_are_no_guides() -> None:
+    image = Image.new("RGB", (400, 800), (30, 30, 30))
+    model = [
+        Box(10, 10, 180, 180, 0.9),
+        Box(210, 10, 180, 180, 0.8),
+        Box(10, 400, 180, 180, 0.85),
+        Box(210, 400, 180, 180, 0.88),
+    ]
+    fused = fuse_detections(image, model, [], [])
+    assert len(fused) == 4
+    assert {box.score for box in fused} == {0.9, 0.8, 0.85, 0.88}
+
+
+def test_fusion_leaves_a_margin_strip_out() -> None:
+    image = Image.new("RGB", (400, 400), "white")
+    model = [Box(20, 20, 360, 300, 0.9)]
+    gutters = [Box(20, 340, 80, 40, 0.5)]
+    fused = fuse_detections(image, model, [], gutters)
+    assert len(fused) == 1
+    assert fused[0].score == 0.9
+
+
+def test_fusion_does_not_split_a_blob_another_box_already_covers() -> None:
+    image = Image.new("RGB", (400, 400), "white")
+    wide = Box(10, 10, 380, 180, 0.3)
+    inner = Box(150, 10, 230, 180, 0.45)
+    frame = Box(10, 10, 180, 180, 0.5)
+    fused = fuse_detections(image, [wide, inner], [frame], [])
+    assert any(box.w > 300 for box in fused)
+
+
+def test_fusion_keeps_a_wide_box_when_children_cover_one_side() -> None:
+    image = Image.new("RGB", (400, 400), (20, 20, 20))
+    wide = Box(10, 10, 380, 180, 0.6)
+    right_a = Box(220, 20, 150, 160, 0.9)
+    right_b = Box(240, 30, 140, 150, 0.85)
+    fused = fuse_detections(image, [wide, right_a, right_b], [], [])
+    assert any(box.w > 300 for box in fused)
+
+
+def test_fusion_does_not_add_a_gutter_that_already_holds_a_panel() -> None:
+    image = Image.new("RGB", (400, 800), "white")
+    model = [Box(40, 400, 160, 300, 0.9)]
+    gutters = [Box(20, 390, 340, 360, 0.5)]
+    fused = fuse_detections(image, model, [], gutters)
+    assert len(fused) == 1
+    assert fused[0].score == 0.9
 
 
 def test_frame_panels_follow_rules_and_ignore_a_blank_page() -> None:
