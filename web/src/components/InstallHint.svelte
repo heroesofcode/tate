@@ -1,14 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from '../lib/i18n';
-  import { installPlatform, isInstalledDisplay, type InstallPlatform } from '../lib/install';
-
-  const STORAGE_KEY = 'tate-install-dismissed';
-
-  interface BeforeInstallPromptEvent extends Event {
-    prompt(): Promise<void>;
-    userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-  }
+  import {
+    canOfferInstall,
+    dismissInstallOffer,
+    installPlatform,
+    installPromptController,
+    type BeforeInstallPromptEvent,
+    type InstallPlatform,
+  } from '../lib/install';
 
   let visible = $state(false);
   let platform = $state<InstallPlatform>('other');
@@ -16,36 +16,21 @@
 
   onMount(() => {
     platform = installPlatform(navigator.userAgent);
-    if (platform === 'other' || isInstalledDisplay()) return;
-    try {
-      if (localStorage.getItem(STORAGE_KEY) === '1') return;
-    } catch {
-      /* private mode */
-    }
+    if (!canOfferInstall()) return;
     visible = true;
-    const onPrompt = (event: Event) => {
-      event.preventDefault();
-      deferred = event as BeforeInstallPromptEvent;
-    };
-    window.addEventListener('beforeinstallprompt', onPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', onPrompt);
+    return installPromptController().subscribe((event) => {
+      deferred = event;
+    });
   });
 
   function dismiss() {
     visible = false;
-    try {
-      localStorage.setItem(STORAGE_KEY, '1');
-    } catch {
-      /* ignore */
-    }
+    dismissInstallOffer();
   }
 
   async function install() {
-    if (!deferred) return;
-    await deferred.prompt();
-    const choice = await deferred.userChoice;
-    deferred = null;
-    if (choice.outcome === 'accepted') dismiss();
+    const outcome = await installPromptController().prompt();
+    if (outcome === 'accepted') dismiss();
   }
 </script>
 
